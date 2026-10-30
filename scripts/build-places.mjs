@@ -219,7 +219,7 @@ const nextId = () => `pc-${idSeq++}`;
 /* মেশানো + সমৃদ্ধকরণ                                                 */
 /* ------------------------------------------------------------------ */
 const byKey = new Map(); // districtId|key(name) -> place
-const snapped = [], flagged = [], dupeSkipped = [], enriched = [];
+const snapped = [], flagged = [], alreadyApplied = [], enriched = [], outsideKept = [];
 
 function normalizePlace(p, source) {
   const districtId = String(p.district_id);
@@ -247,15 +247,27 @@ function normalizePlace(p, source) {
     coordSource = c.exact ? "উপজেলা-কেন্দ্র" : "জেলা-কেন্দ্র";
     inOwnDistrict = true;
   } else if (!inOwnDistrict) {
-    // ভুল জেলায় পড়ছে → উপজেলার কেন্দ্রে সরানো হলো, রেকর্ডসহ
-    const c = upazilaCenter(districtId, upazilaName, p.upazila_id);
-    if (c.point) {
-      snapped.push({ name, district: d.bn_name, from: [lat, lon], to: c.point, source });
-      lat = c.point[0]; lon = c.point[1];
-      coordSource = c.exact ? "উপজেলা-কেন্দ্র (স্ন্যাপ)" : "জেলা-কেন্দ্র (স্ন্যাপ)";
-      inOwnDistrict = true;
+    // সীমানার বাইরে পড়ছে। উৎসভেদে আচরণ আলাদা:
+    //
+    // লেখকের স্থানাঙ্ক ইচ্ছাকৃত, তাই সেটা সরানো হয় না। দ্বীপ, সমুদ্র সৈকত,
+    // নদীর মোহানা ও সমুদ্রতীরের গন্তব্য সরলীকৃত স্থল-পলিগনের বাইরে পড়াটাই
+    // স্বাভাবিক। আগে এগুলোও উপজেলা-কেন্দ্রে স্ন্যাপ হতো, ফলে ছেঁড়া দ্বীপ,
+    // শাহপরীর দ্বীপ ও সাবরাং — তিনটি আলাদা দ্বীপ একই বিন্দুতে গাদা হয়ে
+    // গিয়েছিল এবং আসল অবস্থান নষ্ট হয়েছিল।
+    // স্ন্যাপের বদলে পতাকা তোলা হয়, যাতে ভুল স্থানাঙ্ক মানুষ পর্যালোচনা করতে পারে।
+    if (source === "authored") {
+      outsideKept.push({ name, district: d.bn_name, lat, lon });
     } else {
-      flagged.push({ name, district: d.bn_name, lat, lon, source, reason: "সীমানার বাইরে, স্ন্যাপ করা যায়নি" });
+      // মূল ডেটার সন্দেহজনক বিন্দু → উপজেলার কেন্দ্রে সরানো হলো, রেকর্ডসহ
+      const c = upazilaCenter(districtId, upazilaName, p.upazila_id);
+      if (c.point) {
+        snapped.push({ name, district: d.bn_name, from: [lat, lon], to: c.point, source });
+        lat = c.point[0]; lon = c.point[1];
+        coordSource = c.exact ? "উপজেলা-কেন্দ্র (স্ন্যাপ)" : "জেলা-কেন্দ্র (স্ন্যাপ)";
+        inOwnDistrict = true;
+      } else {
+        flagged.push({ name, district: d.bn_name, lat, lon, source, reason: "সীমানার বাইরে, স্ন্যাপ করা যায়নি" });
+      }
     }
   }
 
@@ -384,7 +396,7 @@ for (const p of authored) {
   if (prev) {
     // একই জেলায় একই নাম → নতুন সারি নয়, বিদ্যমানটিকেই সমৃদ্ধ করা হয়
     if (enrichPlace(prev, p)) enriched.push(prev.name);
-    else dupeSkipped.push(n.name); // লেখক নতুন কিছু দেননি
+    else alreadyApplied.push(n.name); // আগেই প্রয়োগ হয়ে গেছে (পুনরায় চালালে একই ফল)
     continue;
   }
   byKey.set(k, n);
@@ -452,6 +464,13 @@ report += `সমৃদ্ধ: **${enriched.length}** (বিদ্যমান 
 report += `জেলা শহর থেকে দূরত্ব আছে: ${withDist}/${places.length}\n\n`;
 report += `## বিভাগ\n\n`;
 for (const c of [...catCount.entries()].sort((a, b) => b[1] - a[1])) report += `- ${c[0]}: ${c[1]}\n`;
+if (outsideKept.length) {
+  report += `\n## সীমানার বাইরে, তবে লেখকের স্থানাঙ্ক রাখা হয়েছে (${outsideKept.length})\n\n`;
+  report += `এগুলো ইচ্ছাকৃতভাবে সরানো হয়নি — দ্বীপ, সৈকত ও সমুদ্রতীরের গন্তব্য সরলীকৃত স্থল-পলিগনের বাইরে পড়াটাই স্বাভাবিক।\nতবু ভুল স্থানাঙ্ক থাকলে এখানে চোখ বোলানো দরকার।\n\n| গন্তব্য | জেলা | স্থানাঙ্ক |\n|---|---|---|\n`;
+  for (const o of outsideKept)
+    report += `| ${o.name} | ${o.district} | ${o.lat}, ${o.lon} |\n`;
+}
+
 if (snapped.length) {
   report += `\n## স্ন্যাপ করা হয়েছে (${snapped.length})\n\n| গন্তব্য | জেলা | আগের স্থানাঙ্ক | নতুন |\n|---|---|---|---|\n`;
   for (const s of snapped.slice(0, 60))
@@ -461,13 +480,13 @@ if (flagged.length) {
   report += `\n## সমস্যা চিহ্নিত (${flagged.length})\n\n| গন্তব্য | জেলা | কারণ |\n|---|---|---|\n`;
   for (const f of flagged.slice(0, 60)) report += `| ${f.name} | ${f.district} | ${f.reason} |\n`;
 }
-if (dupeSkipped.length) report += `\n## ডুপ্লিকেট বাদ (${dupeSkipped.length})\n\n${dupeSkipped.slice(0, 40).join(", ")}\n`;
+if (alreadyApplied.length) report += `\n## আগেই প্রয়োগ হয়েছে (${alreadyApplied.length})\n\nস্ক্রিপ্টটি পুনরায় চালালে এই গন্তব্যগুলো আবার সমৃদ্ধ হয় না — নতুন তথ্য না পেলে অপরিবর্তিত থাকে।\n\n${alreadyApplied.slice(0, 40).join(", ")}\n`;
 fs.writeFileSync(path.join(root, "data", "PLACES_REPORT.md"), report);
 
 console.log("— গন্তব্য তৈরি —");
 console.log("মোট        :", places.length, `(মূল ${existingCount} + নতুন ${added})`);
 console.log("সমৃদ্ধ     :", enriched.length);
 console.log("দূরত্ব যুক্ত :", withDist);
-console.log("স্ন্যাপ      :", snapped.length, "| সমস্যা:", flagged.length, "| ডুপ্লিকেট বাদ:", dupeSkipped.length);
+console.log("স্ন্যাপ      :", snapped.length, "| সীমানার বাইরে (রাখা):", outsideKept.length, "| সমস্যা:", flagged.length, "| আগেই প্রয়োগ:", alreadyApplied.length);
 const top = [...catCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
 console.log("বিভাগ      :", top.map(([k, v]) => `${k}=${v}`).join(", "));
