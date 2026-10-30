@@ -181,6 +181,57 @@ function upazilaAtPoint(districtId, lat, lon) {
 /* ------------------------------------------------------------------ */
 /* নতুন লেখা গন্তব্য সংগ্রহ                                             */
 /* ------------------------------------------------------------------ */
+/**
+ * লেখার ভাষা প্রহরা
+ * ------------------------------------------------------------------
+ * কেন দরকার: একবার একটি ব্যাচে "সংক্রমণ"-এর বদলে ভুলবশত দেবনাগরী
+ * "संक्रमण" মিশে গিয়েছিল। এটি কোনো যাচাইতে ধরা পড়েনি, পাইপলাইন
+ * সাফল্যের সাথে চলেছিল, এবং ভুলটি কমিট হয়ে লাইভ সাইটে চলে গিয়েছিল —
+ * অর্থাৎ ক্ষতি দুই ধাপ পরে এবং সম্পূর্ণ নীরবে প্রকাশ পেয়েছিল।
+ *
+ * এই প্রহরা সেই ব্যর্থতা-ধরনটিকে একটি জোরে ব্যর্থতায় পরিণত করে:
+ * অনুমোদিত লিপি ছাড়া অন্য কোনো অক্ষর (দেবনাগরী বর্ণ, CJK, কোরীয়,
+ * সিরিলিক, গ্রিক ইত্যাদি) থাকলে পাইপলাইন থেমে যাবে এবং ফাইল, গন্তব্য,
+ * ঘর ও অক্ষরগুলো নাম ধরে বলবে।
+ *
+ * অনুমোদিত: বাংলা লিপি, দাঁড়ি/দ্বিদাঁড়ি (Unicode-এ দেবনাগরী ব্লকে থাকলেও
+ * বাংলার প্রমুক্ত বিরামচিহ্ন), লাতিন বর্ণ ও সংখ্যা, সাধারণ বিরামচিহ্ন।
+ */
+const FOREIGN_SCRIPT =
+  /[^\s\u0020-\u007E\u00A0-\u00BF\u0964\u0965\u0980-\u09FF\u2010-\u2027\u2030-\u205E\u00D7\u00F7]/g;
+
+function assertScriptClean(list) {
+  const bad = [];
+  for (const p of list) {
+    for (const [field, value] of Object.entries(p)) {
+      if (field === "__file" || typeof value !== "string") continue;
+      const hits = value.match(FOREIGN_SCRIPT);
+      if (!hits) continue;
+      const chars = [...new Set(hits)];
+      const at = value.search(FOREIGN_SCRIPT);
+      bad.push({
+        file: p.__file,
+        place: p.name || "(নাম নেই)",
+        field,
+        chars,
+        context: value.slice(Math.max(0, at - 25), at + 25).replace(/\s+/g, " "),
+      });
+    }
+  }
+  if (!bad.length) return;
+  console.error(`\n✗ বিদেশি লিপির অক্ষর পাওয়া গেছে — ${bad.length}টি ঘরে:`);
+  for (const b of bad) {
+    console.error(`   ${b.file} → ${b.place} [${b.field}]`);
+    console.error(`      অক্ষর: ${b.chars.map((c) => `${c} (U+${c.codePointAt(0).toString(16).toUpperCase()})`).join(", ")}`);
+    console.error(`      প্রসঙ্গ: "…${b.context}…"`);
+  }
+  console.error(
+    "\nবাংলা লেখায় কেবল বাংলা লিপি, দাঁড়ি ও লাতিন বর্ণ/সংখ্যা চলবে।\n" +
+    "দেবনাগরী, CJK, কোরীয় বা অন্য লিপির অক্ষর থাকলে তা সরিয়ে আবার চালান।\n",
+  );
+  process.exit(1);
+}
+
 let authored = [];
 if (fs.existsSync(AUTHORED)) {
   const files = fs.readdirSync(AUTHORED).filter((f) => f.endsWith(".json")).sort();
@@ -189,6 +240,7 @@ if (fs.existsSync(AUTHORED)) {
     const list = Array.isArray(batch) ? batch : batch.places || [];
     for (const p of list) authored.push({ ...p, __file: f });
   }
+  assertScriptClean(authored);
   console.log(`পড়া হয়েছে: ${files.length}টি ফাইল থেকে ${authored.length}টি নতুন গন্তব্য`);
 }
 
@@ -430,7 +482,18 @@ function enrichPlace(target, raw) {
 
   if (!touched.length) return false;
 
-  target.enriched_fields = touched;
+  // দ্রষ্টব্য: এখানে আগে `target.enriched_fields = touched;` লেখা হতো।
+  // সেটি সরানো হয়েছে, কারণ ঘরটি কখনও টিকত না — normalizePlace প্রতি
+  // রানে ঘরগুলোর একটি নির্দিশ্ট তালিকা দিয়ে অবজেক্ট পুনর্গঠন করে এবং
+  // enriched_fields সেই তালিকায় ছিল না। ফলে ঘরটি যে রানে লেখা হতো তার
+  // পরের রানেই হারিয়ে যেত: ৪টি গন্তব্যে লেখা, তারপর ০টি। এটিই আউটপুটকে
+  // বাইট-স্তরে অস্থির করে তুলছিল, যদিও কাউন্টারগুলো স্থিতিশীল দেখাত।
+  //
+  // আঠালো না করে মুছে ফেলার কারণ: উপরের মন্তব্য অনুযায়ী বিল্ডকে লেখকের
+  // ফাইলের একটি বিশুদ্ধ ফাংশন হতে হবে। enriched_fields আঠালো করলে আউটপুট
+  // পূর্ববর্তী places.json-এর অবস্থার ওপর নির্ভরশীল হয়ে পড়ত। ঘরটি কোথাও
+  // পড়াও হতো না (অ্যাপ, ডেটাবেস, রিপোর্ট — কোনোটিতেই নেই) এবং ডেটাবেসের
+  // হোয়াইটলিস্টেও নেই, তাই এটি ছিল নিছক একটি অস্থিরতার উৎস।
   return true;
 }
 
