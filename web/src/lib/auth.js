@@ -1,4 +1,4 @@
-import { supabase, hasBackend, trySupabase } from "./supabase";
+import { supabase, hasBackend, trySupabase } from "./supabase.js";
 
 /** অ্যাকাউন্ট ও ভূমিকা (এডমিন প্যানেলের জন্য role = 'admin' দরকার) */
 

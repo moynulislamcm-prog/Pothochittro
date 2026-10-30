@@ -1,4 +1,4 @@
-import { trySupabase, hasBackend } from "./supabase";
+import { trySupabase, hasBackend } from "./supabase.js";
 
 /**
  * কনটেন্ট লোড করার কৌশল:
@@ -140,26 +140,61 @@ export function enrich(content) {
   return content;
 }
 
+/** নির্দিষ্ট সময়ের মধ্যে ফলাফল, না হলে টাইমআউট */
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} টাইমআউট`)), ms)),
+  ]);
+}
+
+/**
+ * বান্ডিলের স্থির ডেটা — সাথে সাথে ফেরে, তাই সাইট কখনো লোডিং স্ক্রিনে আটকে থাকে না।
+ */
+export async function loadStaticContent() {
+  const base = enrich(await loadStatic());
+  return { ...base, online: false };
+}
+
+/**
+ * Supabase থেকে হালনাগাদ কনটেন্ট। ব্যাকএন্ড না চললে, ডেটাবেস খালি থাকলে,
+ * বা ধীর হলে null ফেরে — তখন স্থির ডেটাতেই সাইট চলতে থাকে।
+ */
+export async function loadRemoteContent({ timeoutMs = 8000 } = {}) {
+  if (!hasBackend) return null;
+  try {
+    const remote = await withTimeout(loadFromSupabase(), timeoutMs, "ব্যাকএন্ড");
+    if (!remote) return null;
+    return { ...enrich(remote), online: true };
+  } catch (err) {
+    console.warn("ব্যাকএন্ড থেকে কনটেন্ট আনা যায়নি:", err?.message || err);
+    return null;
+  }
+}
+
+/** স্থির + ব্যাকএন্ড একসাথে (পুরনো কলারের জন্য রাখা) */
 export async function loadContent() {
   let base = null;
   try {
-    base = enrich(await loadStatic());
+    base = await loadStaticContent();
   } catch (err) {
     console.warn("স্থির ডেটা লোড করা যায়নি:", err);
   }
 
-  const remote = await loadFromSupabase();
-
+  const remote = await loadRemoteContent();
   if (!remote) {
     if (!base) throw new Error("কোনো ডেটা লোড করা যায়নি");
-    return { ...base, online: false };
+    return base;
   }
+  return mergeRemoteOverBase(base, remote);
+}
 
-  /* সীমানা Supabase-এ না থাকলে বান্ডিলেরটাই রাখা */
-  if (!remote.boundaries && base?.boundaries) remote.boundaries = base.boundaries;
-  if (!remote.divisions?.length && base?.divisions?.length) remote.divisions = base.divisions;
-
-  return { ...enrich(remote), online: true };
+/** ব্যাকএন্ডের ডেটায় যা নেই (যেমন সীমানা) সেটি বান্ডিল থেকে পূরণ */
+export function mergeRemoteOverBase(base, remote) {
+  const out = { ...remote };
+  if (!out.boundaries?.features?.length && base?.boundaries) out.boundaries = base.boundaries;
+  if (!out.divisions?.length && base?.divisions?.length) out.divisions = base.divisions;
+  return enrich(out);
 }
 
 /** সাইট সেটিংস (এডমিন প্যানেল থেকে বদলানো যায়) */

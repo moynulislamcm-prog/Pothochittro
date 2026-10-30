@@ -4,16 +4,18 @@
  * publishable/anon কী পাবলিক; ব্রাউজারে থাকা নিরাপদ।
  * আসল নিরাপত্তা Supabase-এর Row Level Security নীতিতে (supabase/schema.sql)।
  */
+const env = (typeof import.meta !== "undefined" && import.meta.env) || {};
+
 export const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || "https://oxziyvshobedekqobyyo.supabase.co";
+  env.VITE_SUPABASE_URL || "https://oxziyvshobedekqobyyo.supabase.co";
 
 export const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  env.VITE_SUPABASE_ANON_KEY ||
   "sb_publishable_wuHnyuPIThfzbjSvnn8oPA_Zow9ceYb";
 
 /** সুবিধা না থাকলে (অফলাইন ডেমো) ডেটা শুধু বান্ডিল থেকে আসবে */
 export const STANDALONE =
-  import.meta.env.VITE_PATHCHITRO_STANDALONE === "true" ||
+  env.VITE_PATHCHITRO_STANDALONE === "true" ||
   (typeof window !== "undefined" && window.__PATHCHITRO_STANDALONE__ === true);
 
 export const SITE = {

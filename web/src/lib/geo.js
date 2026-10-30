@@ -1,4 +1,4 @@
-import { OSRM_URL } from "../config";
+import { OSRM_URL } from "../config.js";
 
 const R = 6371.0088; // পৃথিবীর গড় ব্যাসার্ধ (কিমি)
 const rad = (d) => (d * Math.PI) / 180;

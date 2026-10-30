@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import { useApp } from "../lib/store.jsx";
-import { MAP_TILE_URL, MAP_ATTRIBUTION, BD_CENTER, BD_BOUNDS } from "../config";
+import { MAP_TILE_URL, MAP_ATTRIBUTION, BD_CENTER, BD_BOUNDS } from "../config.js";
 import { haversineKm, formatKm, roadDistanceKm, compassLabel, bearingDeg } from "../lib/geo.js";
 import { bn } from "../lib/format.js";
 

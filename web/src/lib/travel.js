@@ -1,4 +1,4 @@
-import { trySupabase, hasBackend } from "./supabase";
+import { trySupabase, hasBackend } from "./supabase.js";
 
 /**
  * ভ্রমণতালিকা সংরক্ষণ

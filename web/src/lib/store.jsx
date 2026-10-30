@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { loadContent, loadSettings } from "./api";
-import { getSession, getProfile, onAuthChange, signIn as doSignIn, signOut as doSignOut, signUp as doSignUp } from "./auth";
+import { loadStaticContent, loadRemoteContent, mergeRemoteOverBase, loadSettings } from "./api.js";
+import { getSession, getProfile, onAuthChange, signIn as doSignIn, signOut as doSignOut, signUp as doSignUp } from "./auth.js";
 import {
   countTravel,
   emptyTravel,
@@ -13,8 +13,8 @@ import {
   setDistrictStatus as setDistrictStatusData,
   setPlaceStatus as setPlaceStatusData,
   writeLocal,
-} from "./travel";
-import { hasBackend } from "./supabase";
+} from "./travel.js";
+import { hasBackend } from "./supabase.js";
 
 const AppContext = createContext(null);
 
@@ -41,19 +41,27 @@ export function AppProvider({ children }) {
   const [liveError, setLiveError] = useState("");
   const watchRef = useRef(null);
 
-  /* ---------- কনটেন্ট ---------- */
+  /* ---------- কনটেন্ট ----------
+     প্রথমে বান্ডিলের স্থির ডেটা দেখানো হয় (সাইট কখনো আটকে থাকে না),
+     এরপর ব্যাকএন্ড থেকে হালনাগাদ কনটেন্ট এলে সেটি বসে যায়। */
+  const baseRef = useRef(null);
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const data = await loadContent();
+        const base = await loadStaticContent();
         if (!alive) return;
-        setContent(data);
+        baseRef.current = base;
+        setContent(base);
       } catch (err) {
         if (alive) setLoadError(err?.message || "তথ্য লোড করা যায়নি। পৃষ্ঠাটি রিফ্রেশ করুন।");
       } finally {
         if (alive) setLoading(false);
       }
+
+      const remote = await loadRemoteContent();
+      if (!alive || !remote) return;
+      setContent(mergeRemoteOverBase(baseRef.current, remote));
     })();
     loadSettings().then((s) => alive && setSettings(s));
     return () => {
