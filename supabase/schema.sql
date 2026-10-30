@@ -43,24 +43,43 @@ create index if not exists pc_upazilas_district_idx on public.pc_upazilas(distri
 
 -- ---------- গন্তব্য ----------
 create table if not exists public.pc_places (
-  id           text primary key,
-  district_id  text not null references public.pc_districts(id) on delete cascade,
-  upazila_id   text references public.pc_upazilas(id) on delete set null,
-  upazila_bn   text not null default '',
-  name         text not null,
-  name_en      text not null default '',
-  category     text not null default 'heritage',
-  lat          double precision,
-  lon          double precision,
-  summary      text not null default '',
-  description  text not null default '',
-  image        text,
-  is_published boolean not null default true,
-  updated_at   timestamptz not null default now()
+  id              text primary key,
+  district_id     text not null references public.pc_districts(id) on delete cascade,
+  upazila_id      text references public.pc_upazilas(id) on delete set null,
+  upazila_bn      text not null default '',
+  name            text not null,
+  name_en         text not null default '',
+  category        text not null default 'heritage',
+  lat             double precision,
+  lon             double precision,
+  summary         text not null default '',
+  description     text not null default '',
+  image           text,
+  -- কনটেন্ট ও ডেটা-গুণমান কলাম (মাইগ্রেশন pathchitro_place_content_columns)
+  slug            text,                      -- /places/:slug রাউট ও canonical URL
+  history         text,                      -- বিস্তারিত ইতিহাস; অনুচ্ছেদ খালি লাইনে আলাদা
+  how_to_go       text,                      -- কীভাবে যাবেন
+  best_time       text,                      -- ভ্রমণের উপযুক্ত সময়
+  locality        text,                      -- থানা শহর / জেলা শহর / মফস্বল
+  dist_from_hq_km numeric(6,1),              -- জেলা শহর থেকে সরলরেখার দূরত্ব
+  coord_source    text,                      -- মূল ডেটা / লেখক / উপজেলা-কেন্দ্র / জেলা-কেন্দ্র
+  coord_verified  boolean not null default false,
+  verified        boolean not null default true,  -- false মানে কনটেন্ট যাচাই বাকি
+  source          text,                      -- মূল / লেখক / মূল+লেখক
+  is_published    boolean not null default true,
+  updated_at      timestamptz not null default now()
 );
 
 create index if not exists pc_places_district_idx on public.pc_places(district_id);
 create index if not exists pc_places_category_idx on public.pc_places(category);
+create index if not exists pc_places_district_id_idx on public.pc_places(district_id);
+
+-- স্লাগ অনন্য হতে হবে কারণ এটিই /places/:slug রাউট ও canonical URL গঠন করে।
+-- আংশিক UNIQUE INDEX ব্যবহার করা হয়েছে যাতে একাধিক NULL অনুমোদিত থাকে —
+-- স্লাগ ছাড়া গন্তব্য তৈরি হলে ইনসার্ট ব্যর্থ হবে না, কিন্তু ডুপ্লিকেট স্লাগ
+-- কঠোরভাবে ঠেকানো হবে।
+create unique index if not exists pc_places_slug_key
+  on public.pc_places(slug) where slug is not null;
 
 -- ---------- জেলার সীমানা (GeoJSON) ----------
 create table if not exists public.pc_boundaries (

@@ -325,7 +325,12 @@ function normalizePlace(p, source) {
     lat: Math.round(lat * 1e5) / 1e5,
     lon: Math.round(lon * 1e5) / 1e5,
     coord_source: coordSource,
-    coord_verified: source === "authored" && p.verified === true ? true : coordSource === "মূল ডেটা" && inOwnDistrict,
+    // সংরক্ষিত মান থাকলে তা আঠালো রাখা হয়। নাহলে প্রতি রানে বিদ্যমান
+    // গন্তব্যগুলোর মান নিঃশর্তে রিসেট হয়ে যেত।
+    coord_verified:
+      p.coord_verified === undefined
+        ? (source === "authored" && p.verified === true ? true : coordSource === "মূল ডেটা" && inOwnDistrict)
+        : p.coord_verified,
     upazila_id: upazilaId,
     upazila_bn: upazilaName || null,
     locality: canon(p.locality || "") || null,
@@ -336,8 +341,18 @@ function normalizePlace(p, source) {
     best_time: canon(p.best_time || p.bestTime || "") || null,
     dist_from_hq_km: distKm,
     image: p.image || null,
-    source: source === "authored" ? "লেখক" : "মূল",
-    verified: source === "authored" ? p.verified === true : true,
+    // গুরুত্বপূর্ণ: বিদ্যমান রেকর্ডের সংরক্ষিত source ও verified আঠালো রাখা হয়।
+    //
+    // আগে এই দুই লাইন বিদ্যমান গন্তব্যের জন্য নিঃশর্তভাবে "মূল"/true বসাত,
+    // অর্থাৎ places.json-এ সংরক্ষিত মান মুছে ফেলত। ফলে প্রতি রানে লেখকের
+    // লেখা ৬৫টি নতুন গন্তব্য ও সমৃদ্ধ করা গন্তব্যগুলো আবার "মূল"/verified:true
+    // হয়ে যেত — এবং সাইটে আমার নিজের লেখা যাচাই-না-করা কনটেন্টের পাশে
+    // "তথ্য যাচাইকৃত" দেখাত। এটি coord_source-এর বাগেরই একই শ্রেণী।
+    source: source === "authored" ? "লেখক" : (p.source || "মূল"),
+    verified:
+      source === "authored"
+        ? p.verified === true
+        : (p.verified === undefined ? true : p.verified),
   };
 }
 
@@ -395,12 +410,26 @@ function enrichPlace(target, raw) {
     }
   }
 
+  // verified ও source লেখকের ফাইলের ঘোষণা থেকে নিঃশর্তভাবে নির্ধারিত হয় —
+  // "এই রানে কিছু বদলেছে কি না" (touched) তার ওপর নয়।
+  //
+  // আগে !touched.length হলে এখানেই return হয়ে যেত। ফলে কনটেন্ট আগেই প্রয়োগ
+  // হয়ে থাকলে normalizePlace-এর রিসেট করা ভুল মান আর কখনো সংশোধন হতো না।
+  // এখন সিদ্ধান্তটি লেখক কোন কোন ঘর ঘোষণা করেছেন তা থেকে আসে, বর্তমান
+  // মানের সাথে তুলনা করে নয় — তাই বিল্ড লেখকের ফাইলের একটি বিশুদ্ধ ফাংশন
+  // এবং যতবারই চালানো হোক একই ফল দেয়।
+  const declaresText = ENRICH_FIELDS.some(
+    (f) => f !== "image" && raw[f] != null && String(raw[f]).trim() !== "",
+  );
+  if (raw.verified === true) target.verified = true;
+  else if (declaresText) target.verified = false;
+
+  // "মূল" থেকে "মূল+লেখক"-এ উন্নীত হয় কেবল মূল (legacy) গন্তব্য। বিশুদ্ধ
+  // লেখকের গন্তব্য "লেখক"-ই থাকে — আঠালো source-এর কারণে এটি এখন টেকসই।
+  if (target.source === "মূল") target.source = "মূল+লেখক";
+
   if (!touched.length) return false;
 
-  if (raw.verified === true) target.verified = true;
-  else if (touched.some((f) => f !== "image")) target.verified = false;
-
-  target.source = target.source === "মূল" ? "মূল+লেখক" : target.source;
   target.enriched_fields = touched;
   return true;
 }

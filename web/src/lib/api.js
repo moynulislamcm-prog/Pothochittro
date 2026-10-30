@@ -73,19 +73,36 @@ async function loadFromSupabase() {
   }));
 
   const places = (plaRes.ok ? plaRes.data || [] : []).map((p) => ({
+    // প্রথমে ডেটাবেসের সম্পূর্ণ সারি ছড়িয়ে দেওয়া হয়, তারপর পরিচিত ঘরগুলো
+    // স্বাভাবিকীকরণ করা হয়।
+    //
+    // কেন এটি জরুরি: আগে এখানে একটি নির্দিষ্ট কলাম তালিকা ম্যাপ করা হতো,
+    // যেখানে slug, history, dist_from_hq_km, locality, how_to_go, best_time,
+    // coord_source ও verified ছিল না। অন্যদিকে mergeRemoteOverBase রিমোট
+    // ডেটাকে স্থির ডেটার ওপর পুরোপুরি বসিয়ে দেয় ({ ...remote })। অর্থাৎ
+    // ব্যাকএন্ড সিড করার মুহূর্তেই সাইট থেকে সব ইতিহাস ও জেলা-শহর থেকে
+    // দূরত্ব নীরবে মুছে যেত এবং slug না থাকায় /places/:slug রাউটিং ভেঙে
+    // যেত। ছড়িয়ে দেওয়ার ফলে ভবিষ্যতে ডেটাবেসে নতুন কলাম যোগ হলে সেটি
+    // নিজে থেকেই ফ্রন্টএন্ডে প্রবাহিত হবে — একই বাগ আর ফিরবে না।
+    ...p,
     id: String(p.id),
     district_id: String(p.district_id),
-    district_bn: "",
-    district_en: "",
+    district_bn: p.district_bn || "",
+    district_en: p.district_en || "",
     name: p.name,
     name_en: p.name_en || "",
     category: p.category || "heritage",
-    lat: p.lat,
-    lon: p.lon,
     upazila_id: p.upazila_id ? String(p.upazila_id) : null,
     upazila_bn: p.upazila_bn || "",
+    locality: p.locality || "",
     summary: p.summary || "",
     description: p.description || "",
+    history: p.history || "",
+    how_to_go: p.how_to_go || "",
+    best_time: p.best_time || "",
+    coord_source: p.coord_source || "",
+    dist_from_hq_km: p.dist_from_hq_km ?? null,
+    verified: p.verified ?? true,
     image: p.image || null,
   }));
 

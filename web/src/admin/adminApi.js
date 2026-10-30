@@ -143,6 +143,16 @@ export async function seedFromBundle(onProgress) {
     TABLES.places,
     places,
     (p) => ({
+      // প্রথমে পুরো গন্তব্য ছড়িয়ে দেওয়া হয়, তারপর পরিচিত ঘর স্বাভাবিকীকরণ।
+      //
+      // কেন: আগে এখানে একটি নির্দিষ্ট কলাম তালিকা ছিল, যেখানে slug, history,
+      // how_to_go, best_time, locality, coord_source, dist_from_hq_km ও
+      // verified ছিল না। ফলে এডমিন প্যানেল থেকে সিড করলে ডেটাবেসে সব
+      // ইতিহাস NULL হয়ে যেত — এবং লোড করার সময় রিমোট ডেটা স্থির ডেটাকে
+      // প্রতিস্থাপন করায় সাইট থেকে ইতিহাস ও দূরত্ব মুছে যেত।
+      // district_bn/district_en/division_bn ইচ্ছাকৃতভাবে পাঠানো হয় না:
+      // সেগুলো api.js-এর enrich() জয়েন থেকে ক্লায়েন্ট সাইডেই বানিয়ে নেয়।
+      ...p,
       id: p.id,
       district_id: p.district_id,
       upazila_id: p.upazila_id || null,
@@ -152,8 +162,16 @@ export async function seedFromBundle(onProgress) {
       category: p.category || "heritage",
       lat: p.lat,
       lon: p.lon,
+      locality: p.locality || null,
       summary: p.summary || "",
       description: p.description || "",
+      history: p.history || null,
+      how_to_go: p.how_to_go || null,
+      best_time: p.best_time || null,
+      dist_from_hq_km: p.dist_from_hq_km ?? null,
+      coord_source: p.coord_source || null,
+      coord_verified: p.coord_verified === true,
+      verified: p.verified !== false,
       image: p.image || null,
       is_published: true,
     }),
