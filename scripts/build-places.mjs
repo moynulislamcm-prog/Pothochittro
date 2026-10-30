@@ -219,7 +219,7 @@ const nextId = () => `pc-${idSeq++}`;
 /* মেশানো + সমৃদ্ধকরণ                                                 */
 /* ------------------------------------------------------------------ */
 const byKey = new Map(); // districtId|key(name) -> place
-const snapped = [], flagged = [], dupeSkipped = [];
+const snapped = [], flagged = [], dupeSkipped = [], enriched = [];
 
 function normalizePlace(p, source) {
   const districtId = String(p.district_id);
@@ -313,6 +313,61 @@ for (const p of existing) {
   byKey.set(k, n);
   places.push(n);
 }
+/**
+ * লেখকের ডেটা বিদ্যমান গন্তব্যকে সমৃদ্ধ করে — নতুন সারি তৈরি করে না।
+ *
+ * কেন দরকার: একই জেলায় একই নামের গন্তব্য আগে "ডুপ্লিকেট" ধরে বাদ পড়ত।
+ * ফলে মূল ডেটার ২১৫টি গন্তব্যে ইতিহাস/কীভাবে যাবেন যোগ করার কোনো
+ * উপায় ছিল না — লেখা চুপচাপ ফেলে দেওয়া হতো।
+ *
+ * নীতি:
+ *  - লেখক যে ঘর স্পষ্টভাবে দিয়েছেন কেবল সেটাই বসে (খালি ঘর মুছে ফেলে না)।
+ *  - স্থানাঙ্ক বদলায় শুধু `override_coords: true` দিলে। লেখকের আন্দাজি
+ *    স্থানাঙ্ক মূল ডেটার চেয়ে খারাপ হওয়ার সম্ভাবনাই বেশি, তাই এই সতর্কতা।
+ *  - নতুন লেখা তথ্য যোগ হলে `verified: false` — ব্যবহারকারীর শর্ত অনুযায়ী
+ *    লেখকের তথ্য যাচাই-বাকি হিসেবে চিহ্নিত থাকবে।
+ */
+const ENRICH_FIELDS = [
+  "name_en", "category", "upazila_bn", "upazila_id", "locality",
+  "summary", "description", "history", "how_to_go", "best_time", "image",
+];
+
+function enrichPlace(target, raw) {
+  const touched = [];
+  for (const f of ENRICH_FIELDS) {
+    const v = raw[f];
+    if (v == null || v === "") continue; // লেখক এই ঘর দেননি
+    const cv = typeof v === "string" ? canon(v) : v;
+    if (!cv) continue;
+    if (target[f] === cv) continue; // একই মান, বদলের দরকার নেই
+    target[f] = cv;
+    touched.push(f);
+  }
+
+  if (raw.override_coords === true && typeof raw.lat === "number" && typeof raw.lon === "number") {
+    const lat = Math.round(raw.lat * 1e5) / 1e5;
+    const lon = Math.round(raw.lon * 1e5) / 1e5;
+    if (target.lat !== lat || target.lon !== lon) {
+      target.lat = lat;
+      target.lon = lon;
+      target.coord_source = "লেখক";
+      // দূরত্ব স্থানাঙ্ক থেকেই আসে, তাই নতুন করে মাপা হলো
+      const hq = districtHq(target.district_id);
+      target.dist_from_hq_km = hq ? Math.round(haversineKm(hq, [lat, lon]) * 10) / 10 : null;
+      touched.push("স্থানাঙ্ক");
+    }
+  }
+
+  if (!touched.length) return false;
+
+  if (raw.verified === true) target.verified = true;
+  else if (touched.some((f) => f !== "image")) target.verified = false;
+
+  target.source = target.source === "মূল" ? "মূল+লেখক" : target.source;
+  target.enriched_fields = touched;
+  return true;
+}
+
 const existingCount = places.length;
 
 let added = 0;
@@ -325,7 +380,13 @@ for (const p of authored) {
   const n = normalizePlace({ ...p, district_id: districtId }, "authored");
   if (!n) { flagged.push({ name: canon(p.name), district: districtById.get(districtId)?.bn_name, reason: "নাম/স্থানাঙ্ক নেই" }); continue; }
   const k = `${n.district_id}|${key(n.name)}`;
-  if (byKey.has(k)) { dupeSkipped.push(n.name); continue; }
+  const prev = byKey.get(k);
+  if (prev) {
+    // একই জেলায় একই নাম → নতুন সারি নয়, বিদ্যমানটিকেই সমৃদ্ধ করা হয়
+    if (enrichPlace(prev, p)) enriched.push(prev.name);
+    else dupeSkipped.push(n.name); // লেখক নতুন কিছু দেননি
+    continue;
+  }
   byKey.set(k, n);
   places.push(n);
   added++;
@@ -386,7 +447,8 @@ const catCount = new Map();
 for (const p of places) catCount.set(p.category, (catCount.get(p.category) || 0) + 1);
 
 let report = `# গন্তব্য তৈরির প্রতিবেদন\n\n`;
-report += `মোট গন্তব্য: **${places.length}** (মূল ${existingCount} + নতুন ${added})\n\n`;
+report += `মোট গন্তব্য: **${places.length}** (মূল ${existingCount} + নতুন ${added})\n`
+report += `সমৃদ্ধ: **${enriched.length}** (বিদ্যমান গন্তব্যে লেখকের তথ্য যোগ হয়েছে)\n\n`;
 report += `জেলা শহর থেকে দূরত্ব আছে: ${withDist}/${places.length}\n\n`;
 report += `## বিভাগ\n\n`;
 for (const c of [...catCount.entries()].sort((a, b) => b[1] - a[1])) report += `- ${c[0]}: ${c[1]}\n`;
@@ -404,6 +466,7 @@ fs.writeFileSync(path.join(root, "data", "PLACES_REPORT.md"), report);
 
 console.log("— গন্তব্য তৈরি —");
 console.log("মোট        :", places.length, `(মূল ${existingCount} + নতুন ${added})`);
+console.log("সমৃদ্ধ     :", enriched.length);
 console.log("দূরত্ব যুক্ত :", withDist);
 console.log("স্ন্যাপ      :", snapped.length, "| সমস্যা:", flagged.length, "| ডুপ্লিকেট বাদ:", dupeSkipped.length);
 const top = [...catCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
