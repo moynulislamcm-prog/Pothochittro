@@ -12,7 +12,6 @@
 [build.environment]
   # Vite 6-এর জন্য Node 18+ দরকার; Netlify-র পুরোনো ডিফল্ট এড়িয়ে আটকে দেওয়া হলো
   NODE_VERSION = "20"
-  NPM_FLAGS = "--legacy-peer-deps"
 
 # Supabase-এর ঠিকানা ও পাবলিশেবল কী src/config.js-এ ডিফল্ট হিসেবে আছে,
 # তাই Netlify-তে আলাদা করে env ভেরিয়েবল বসাতে হবে না।

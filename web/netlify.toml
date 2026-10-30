@@ -10,7 +10,6 @@
 
 [build.environment]
   NODE_VERSION = "20"
-  NPM_FLAGS = "--legacy-peer-deps"
 
 # একক-পেজ অ্যাপ (SPA): সার্ভারে /districts বা /admin নামে কোনো ফাইল নেই,
 # তাই সব অনুরোধ index.html এ পাঠানো হয় — নইলে রিফ্রেশে 404 আসে।
