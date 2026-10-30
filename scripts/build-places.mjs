@@ -212,7 +212,20 @@ function resolveDistrict(p) {
   return null;
 }
 
+/**
+ * নতুন আইডি — বিদ্যমান সর্বোচ্চ আইডির ওপর থেকে শুরু হয়।
+ *
+ * আগে প্রতিবার ১০০০০ থেকে শুরু হতো। ফলে স্ক্রিপ্ট দ্বিতীয়বার চললে
+ * যে গন্তব্যগুলো নতুন যোগ হতো তারা সেই আইডিগুলোই আবার তৈরি করত,
+ * যেগুলো places.json-এ ইতিমধ্যে স্থায়ী হয়ে গেছে — অর্থাৎ আইডি সংঘর্ষ।
+ * এটি React-এ "two children with the same key" সতর্কবার্তা দিত এবং
+ * তালিকা থেকে গন্তব্য বাদ পড়ার ঝুঁকি ছিল (smoke টেস্টে ধরা পড়েছে)।
+ */
 let idSeq = 10000;
+for (const ex of existing) {
+  const m = /^pc-(\d+)$/.exec(String(ex.id || ""));
+  if (m) idSeq = Math.max(idSeq, Number(m[1]) + 1);
+}
 const nextId = () => `pc-${idSeq++}`;
 
 /* ------------------------------------------------------------------ */
@@ -471,6 +484,20 @@ const catCount = new Map();
 for (const p of places) catCount.set(p.category, (catCount.get(p.category) || 0) + 1);
 
 let report = `# গন্তব্য তৈরির প্রতিবেদন\n\n`;
+/* আইডি সংঘর্ষ যাচাই — বিল্ড থামিয়ে দেওয়া হয়, নইলে চুপচাপ ডেটা নষ্ট হয় */
+const idSeen = new Set();
+const idClash = [];
+for (const pl of places) {
+  const pid = String(pl.id);
+  if (idSeen.has(pid)) idClash.push(pid);
+  idSeen.add(pid);
+}
+if (idClash.length) {
+  console.error(`✗ আইডি সংঘর্ষ (${idClash.length}টি): ${[...new Set(idClash)].slice(0, 10).join(", ")}`);
+  console.error("  প্রতিটি গন্তব্যের আইডি অনন্য হতে হবে — বিল্ড থামানো হলো।");
+  process.exit(1);
+}
+
 report += `মোট গন্তব্য: **${places.length}** (মূল ${existingCount} + নতুন ${added})\n`
 report += `সমৃদ্ধ: **${enriched.length}** (বিদ্যমান গন্তব্যে লেখকের তথ্য যোগ হয়েছে)\n\n`;
 report += `জেলা শহর থেকে দূরত্ব আছে: ${withDist}/${places.length}\n\n`;
