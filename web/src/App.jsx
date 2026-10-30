@@ -7,6 +7,7 @@ import DistrictDetail from "./pages/DistrictDetail.jsx";
 import Places from "./pages/Places.jsx";
 import Distance from "./pages/Distance.jsx";
 import MyTravel from "./pages/MyTravel.jsx";
+import PlacePage from "./pages/PlacePage.jsx";
 
 export default function App() {
   return (
@@ -20,6 +21,8 @@ export default function App() {
         <Route path="/districts" element={<Districts />} />
         <Route path="/districts/:id" element={<DistrictDetail />} />
         <Route path="/places" element={<Places />} />
+        {/* প্রতিটি গন্তব্যের নিজস্ব URL — SEO-র মূল ভিত্তি */}
+        <Route path="/places/:slug" element={<PlacePage />} />
         <Route path="/distance" element={<Distance />} />
         <Route path="/my-travel" element={<MyTravel />} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,15 +1,37 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../lib/store.jsx";
 import L from "leaflet";
-import { MAP_TILE_URL, MAP_ATTRIBUTION, BD_CENTER, BD_BOUNDS } from "../config.js";
+import {
+  MAP_TILE_URL,
+  MAP_ATTRIBUTION,
+  BD_CENTER,
+  BD_BOUNDS,
+  UPAZILA_BOUNDS_URL,
+  UPAZILA_MIN_ZOOM,
+} from "../config.js";
 import { haversineKm, formatKm } from "../lib/geo.js";
 import { categoryLabel, bn } from "../lib/format.js";
 
+/**
+ * হালকা বেসম্যাপে (CARTO Positron) রঙগুলো বেশি স্পষ্ট ফোটে,
+ * তাই আগের তুলনায় ফিল-অপাসিটি একটু কমানো হয়েছে।
+ */
 const FILL = {
-  none: { color: "#175c49", weight: 1, fillColor: "#175c49", fillOpacity: 0.05 },
-  wishlist: { color: "#c98a1e", weight: 1.4, fillColor: "#e5ad52", fillOpacity: 0.34 },
-  visited: { color: "#0f4637", weight: 1.6, fillColor: "#1f8a6b", fillOpacity: 0.5 },
-  selected: { color: "#e5ad52", weight: 3, fillColor: "#175c49", fillOpacity: 0.22 },
+  none: { color: "#9fb6ae", weight: 1, fillColor: "#175c49", fillOpacity: 0.07 },
+  wishlist: { color: "#c98a1e", weight: 1.3, fillColor: "#e5ad52", fillOpacity: 0.38 },
+  visited: { color: "#0f4637", weight: 1.6, fillColor: "#1f8a6b", fillOpacity: 0.55 },
+  selected: { color: "#d99a2b", weight: 3, fillColor: "#175c49", fillOpacity: 0.26 },
+};
+
+const HOVER = { weight: 2.4, fillOpacity: 0.42 };
+
+/** উপজেলার সীমানার স্টাইল — সরু সাদা রেখা, যাতে ভেতরের ভাগ দেখা যায় */
+const UPAZILA_STYLE = {
+  color: "#ffffff",
+  weight: 0.7,
+  opacity: 0.75,
+  fill: false,
+  interactive: false,
 };
 
 /**
@@ -33,13 +55,19 @@ export default function MapView({
   const holder = useRef(null);
   const map = useRef(null);
   const districtLayer = useRef(null);
+  const upazilaLayer = useRef(null);
+  const labelLayer = useRef(null);
   const placeLayer = useRef(null);
   const liveLayer = useRef(null);
   const shapes = useRef(new Map());
+  const upazilaLoaded = useRef(false);
 
   const districts = content?.districts || [];
   const places = content?.places || [];
   const boundaries = content?.boundaries;
+
+  /* উপজেলার সীমানা কী অবস্থায় আছে — ব্যবহারকারীকে জানানোর জন্য */
+  const [detailOn, setDetailOn] = useState(false);
 
   /* মানচিত্র একবারই তৈরি হয়, তাই সর্বশেষ কলব্যাক রিফে রাখা হয় —
      না হলে প্রথম রেন্ডারের পুরনো (stale) ফাংশন ধরা পড়ত */
@@ -71,6 +99,9 @@ export default function MapView({
     m.fitBounds(BD_BOUNDS);
     map.current = m;
 
+    /* উপজেলার সীমানা জেলার নিচে থাকবে, তাই আগে যোগ করা হয় */
+    upazilaLayer.current = L.layerGroup().addTo(m);
+
     districtLayer.current = L.geoJSON(null, {
       style: () => FILL.none,
       onEachFeature: (feature, layer) => {
@@ -78,23 +109,86 @@ export default function MapView({
         shapes.current.set(id, layer);
         layer.on("click", () => selectRef.current?.(id));
         layer.bindTooltip(() => districtTooltip(id), { sticky: true, direction: "top" });
+        layer.on("mouseover", function () {
+          const base = currentStyle(id);
+          this.setStyle({ ...base, ...HOVER });
+          if (this.bringToFront) this.bringToFront();
+        });
+        layer.on("mouseout", function () {
+          this.setStyle(currentStyle(id));
+        });
       },
     }).addTo(m);
 
+    /* জেলার নামের লেবেল — হালকা বেসম্যাপে পরিষ্কার ফোটে */
+    labelLayer.current = L.layerGroup().addTo(m);
+
     placeLayer.current = L.layerGroup().addTo(m);
     liveLayer.current = L.layerGroup().addTo(m);
+
+    /* জুম বাড়লে উপজেলার বিস্তারিত সীমানা একবারই লোড হয় */
+    const onZoom = () => {
+      const z = m.getZoom();
+      setDetailOn(z >= UPAZILA_MIN_ZOOM);
+      if (z >= UPAZILA_MIN_ZOOM) loadUpazilas();
+      paintLabels();
+    };
+    m.on("zoomend", onZoom);
 
     const ro = new ResizeObserver(() => m.invalidateSize());
     ro.observe(holder.current);
 
     return () => {
       ro.disconnect();
+      m.off("zoomend", onZoom);
       m.remove();
       map.current = null;
       shapes.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * কোন জেলার বর্তমান রঙ কী হওয়া উচিত।
+   *
+   * গুরুত্বপূর্ণ: Leaflet-এর mouseover/mouseout হ্যান্ডলার মানচিত্র তৈরির সময়
+   * একবারই বাঁধা হয়, তাই সরাসরি selectedId/visited ধরলে প্রথম রেন্ডারের
+   * পুরনো (stale) মান আটকে যেত। সেজন্য সর্বশেষ মান রিফে রাখা হয়।
+   */
+  const styleState = useRef({ selectedId, visited, wishlist });
+  styleState.current = { selectedId, visited, wishlist };
+
+  const currentStyle = (id) => {
+    const st = styleState.current;
+    if (st.selectedId != null && id === String(st.selectedId)) return FILL.selected;
+    if (st.visited[id]) return FILL.visited;
+    if (st.wishlist[id]) return FILL.wishlist;
+    return FILL.none;
+  };
+
+  /** উপজেলার বিস্তারিত সীমানা — ১ MB ফাইল, তাই শুধু একবার ও প্রয়োজনে লোড */
+  async function loadUpazilas() {
+    if (upazilaLoaded.current || !upazilaLayer.current) return;
+    upazilaLoaded.current = true;
+    try {
+      const res = await fetch(UPAZILA_BOUNDS_URL);
+      if (!res.ok) throw new Error(String(res.status));
+      const geo = await res.json();
+      const layer = L.geoJSON(geo, {
+        style: UPAZILA_STYLE,
+        interactive: false,
+        // ক্যানভাসে আঁকা হয়, তাই ৫৪৪টি পলিগনও মসৃণ থাকে
+        renderer: L.canvas({ padding: 0.4 }),
+      });
+      upazilaLayer.current.clearLayers();
+      upazilaLayer.current.addLayer(layer);
+      // উপজেলার রেখা যেন জেলার রঙের নিচে না চাপা পড়ে
+      for (const [, l] of shapes.current) if (l.bringToFront) l.bringToFront();
+    } catch (err) {
+      upazilaLoaded.current = false; // পরের জুমে আবার চেষ্টা করা যাবে
+      console.warn("উপজেলার সীমানা লোড করা যায়নি:", err?.message || err);
+    }
+  }
 
   function districtTooltip(id) {
     const d = districts.find((x) => x.id === id);
@@ -114,32 +208,65 @@ export default function MapView({
     districtLayer.current.clearLayers();
     shapes.current.clear();
     districtLayer.current.addData(boundaries);
-    // addData পরে বাঁধা টুলটিপ/ক্লিক আবার যুক্ত করা দরকার
+    // addData পরে বাঁধা টুলটিপ/ক্লিক/হোভার আবার যুক্ত করা দরকার
     districtLayer.current.eachLayer((layer) => {
       const id = String(layer.feature?.properties?.id);
       shapes.current.set(id, layer);
       layer.on("click", () => selectRef.current?.(id));
       layer.unbindTooltip();
       layer.bindTooltip(() => districtTooltip(id), { sticky: true, direction: "top" });
+      layer.on("mouseover", function () {
+        this.setStyle({ ...currentStyle(id), ...HOVER });
+        if (this.bringToFront) this.bringToFront();
+      });
+      layer.on("mouseout", function () {
+        this.setStyle(currentStyle(id));
+      });
     });
     paintDistricts();
+    paintLabels();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundaries, districts.length]);
 
   /* ---------- রঙ হালনাগাদ ---------- */
   function paintDistricts() {
     for (const [id, layer] of shapes.current) {
-      const style =
-        id === selectedId ? FILL.selected : visited[id] ? FILL.visited : wishlist[id] ? FILL.wishlist : FILL.none;
-      layer.setStyle(style);
-      if (id === selectedId && layer.bringToFront) layer.bringToFront();
+      layer.setStyle(currentStyle(id));
+      if (selectedId != null && id === String(selectedId) && layer.bringToFront) layer.bringToFront();
+    }
+  }
+
+  /* ---------- জেলার নামের লেবেল ----------
+     হালকা বেসম্যাপে নাম স্পষ্ট ফোটে; জুম কমালে বড় জেলাগুলোই শুধু দেখায়,
+     যাতে ৬৪টি নাম একসাথে জট না পাকায়। */
+  function paintLabels() {
+    const m = map.current;
+    const group = labelLayer.current;
+    if (!m || !group) return;
+    group.clearLayers();
+    const zoom = m.getZoom();
+
+    for (const [id, layer] of shapes.current) {
+      const d = districts.find((x) => String(x.id) === id);
+      if (!d || !layer.getBounds) continue;
+      // জুম কম থাকলে কম গন্তব্যযুক্ত জেলার লেবেল বাদ — ভিড় কমে
+      if (zoom <= 7 && (d.place_count || 0) < 2) continue;
+
+      const c = layer.getBounds().getCenter();
+      const icon = L.divIcon({
+        className: "map-label",
+        html: `<span>${escapeHtml(d.bn_name)}</span>`,
+        iconSize: null,
+      });
+      L.marker(c, { icon, interactive: false, keyboard: false }).addTo(group);
     }
   }
 
   useEffect(() => {
     paintDistricts();
+    paintLabels();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, visited, wishlist, boundaries]);
+  }, [selectedId, visited, wishlist, boundaries, districts.length]);
 
   /* ---------- নির্বাচিত জেলায় উড়ে যাওয়া ---------- */
   useEffect(() => {
@@ -193,7 +320,14 @@ export default function MapView({
         p.upazila_bn ? " · " + escapeHtml(p.upazila_bn) : ""
       }</span>
       <span class="popup-cat">${escapeHtml(categoryLabel(p.category))}</span>
+      ${p.locality ? `<span class="popup-meta">${escapeHtml(p.locality)}</span>` : ""}
+      ${
+        p.dist_from_hq_km != null
+          ? `<span class="popup-dist">জেলা শহর থেকে ${formatKm(p.dist_from_hq_km)}</span>`
+          : ""
+      }
       ${dist != null ? `<span class="popup-dist">আপনার অবস্থান থেকে ${formatKm(dist)}</span>` : ""}
+      ${p.verified === false ? `<span class="popup-warn">তথ্য যাচাই বাকি</span>` : ""}
       ${p.image ? `<img src="${escapeHtml(p.image)}" alt="" loading="lazy" />` : ""}
     `;
     if (onOpenPlace) {
@@ -273,6 +407,9 @@ export default function MapView({
             <i className="sw live" /> আপনি
           </span>
         )}
+      </div>
+      <div className={`map-detail-hint${detailOn ? " on" : ""}`} aria-live="polite">
+        {detailOn ? "উপজেলার সীমানা দেখানো হচ্ছে" : "জুম করলে উপজেলার সীমানা দেখা যাবে"}
       </div>
     </div>
   );

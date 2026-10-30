@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useApp } from "../lib/store.jsx";
 import { DistrictCard } from "../components/Cards.jsx";
 import { bn } from "../lib/format.js";
+import { useDocumentMeta, breadcrumbLd, metaDescription } from "../lib/seo.js";
 
 /** ৬৪ জেলার তালিকা — বিভাগ অনুযায়ী, খোঁজ ও ফিল্টারসহ */
 export default function Districts() {
@@ -13,6 +14,17 @@ export default function Districts() {
   const [onlyVisited, setOnlyVisited] = useState(false);
 
   const districts = content?.districts || [];
+  useDocumentMeta({
+    title: "৬৪ জেলার তালিকা — দর্শনীয় স্থান ও মানচিত্র",
+    description: metaDescription(
+      "বাংলাদেশের ৬৪ জেলার সম্পূর্ণ তালিকা। প্রতিটি জেলার দর্শনীয় স্থান, উপজেলা, মানচিত্র ও জেলা শহর থেকে দূরত্ব। বিভাগ অনুযায়ী খুঁজুন।",
+    ),
+    path: "/districts",
+    jsonLd: breadcrumbLd([
+      { name: "হোম", path: "/" },
+      { name: "৬৪ জেলা", path: "/districts" },
+    ]),
+  });
 
   const divisions = useMemo(() => {
     const map = new Map();
@@ -104,7 +116,7 @@ export default function Districts() {
           </div>
           <div className="dgrid">
             {list.map((d) => (
-              <DistrictCard key={d.id} district={d} onOpen={() => navigate(`/districts/${d.id}`)} />
+              <DistrictCard key={d.id} district={d} />
             ))}
           </div>
         </section>

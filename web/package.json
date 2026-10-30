@@ -6,9 +6,10 @@
   "description": "পথচিত্র — বাংলাদেশের ৬৪ জেলার মানচিত্র, গন্তব্য ও নিজের ভ্রমণতালিকা",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node ../scripts/build-seo.mjs && vite build && node ../scripts/prerender.mjs",
     "preview": "vite preview",
-    "smoke": "vite build --ssr smoke/entry.jsx --outDir .smoke --emptyOutDir --logLevel warn && node smoke/run.mjs"
+    "smoke": "vite build --ssr smoke/entry.jsx --outDir .smoke --emptyOutDir --logLevel warn && node smoke/run.mjs",
+    "build:seo": "node ../scripts/build-seo.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
@@ -19,7 +20,10 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.5.0",
+    "bangladesh-geo-data": "^4.0.9",
+    "bd-geojson": "^1.0.5",
     "jsdom": "^30.1.3",
+    "simplify-js": "^1.2.4",
     "vite": "^6.3.5"
   }
 }

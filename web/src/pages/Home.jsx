@@ -5,6 +5,8 @@ import MapView from "../components/MapView.jsx";
 import LiveLocation from "../components/LiveLocation.jsx";
 import PlaceDetail from "../components/PlaceDetail.jsx";
 import { bn } from "../lib/format.js";
+import { useDocumentMeta, siteLd } from "../lib/seo.js";
+import { districtPath } from "../lib/links.js";
 
 const BADGES = [
   { at: 1, label: "প্রথম পদচিহ্ন" },
@@ -20,6 +22,14 @@ export default function Home() {
 
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
+  /* SEO — হোম পেজের পরিচয় */
+  useDocumentMeta({
+    title: null,
+    description:
+      "বাংলাদেশের ৬৪ জেলার দর্শনীয় স্থান, ইতিহাস, মানচিত্র ও ভ্রমণ নির্দেশিকা। কোন জেলায় কী আছে, জেলা শহর থেকে কত দূর — সব এক জায়গায়।",
+    path: "/",
+    jsonLd: siteLd(),
+  });
   const [openPlace, setOpenPlace] = useState(null);
   const [flyTo, setFlyTo] = useState(null);
 
@@ -183,7 +193,7 @@ export default function Home() {
                   >
                     {travel?.wishlistDistricts?.[selected.id] ? "যেতে চাই ♡" : "যেতে চাই"}
                   </button>
-                  <Link className="btn ghost sm" to={`/districts/${selected.id}`}>
+                  <Link className="btn ghost sm" to={districtPath(selected)}>
                     নির্দেশিকা
                   </Link>
                 </div>

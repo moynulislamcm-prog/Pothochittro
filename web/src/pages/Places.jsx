@@ -5,6 +5,7 @@ import { PlaceCard } from "../components/Cards.jsx";
 import PlaceDetail from "../components/PlaceDetail.jsx";
 import { CATEGORY_ORDER, categoryLabel, bn } from "../lib/format.js";
 import { haversineKm } from "../lib/geo.js";
+import { useDocumentMeta, breadcrumbLd, metaDescription } from "../lib/seo.js";
 
 /** সব গন্তব্য — ধরন, জেলা, উপজেলা ও খোঁজ দিয়ে ফিল্টার */
 export default function Places() {
@@ -20,6 +21,17 @@ export default function Places() {
 
   const places = content?.places || [];
   const districts = content?.districts || [];
+  useDocumentMeta({
+    title: "দর্শনীয় স্থানের তালিকা — ইতিহাস ও দূরত্বসহ",
+    description: metaDescription(
+      "বাংলাদেশের দর্শনীয় স্থানের সম্পূর্ণ তালিকা — প্রত্নস্থল, মসজিদ, মন্দির, জাদুঘর, প্রকৃতি ও সমুদ্র সৈকত। প্রতিটির ইতিহাস, অবস্থান ও জেলা শহর থেকে দূরত্ব।",
+    ),
+    path: "/places",
+    jsonLd: breadcrumbLd([
+      { name: "হোম", path: "/" },
+      { name: "গন্তব্যের তালিকা", path: "/places" },
+    ]),
+  });
 
   /* ?focus=<placeId> থেকে সরাসরি বিস্তারিত খোলা */
   useEffect(() => {

@@ -142,6 +142,8 @@ const ROUTES = [
   { path: "/", expect: ["বাংলাদেশটা দেখুন", "মানচিত্রে অন্বেষণ", "আমি যে জেলাগুলো ঘুরেছি"] },
   { path: "/districts", expect: ["জেলায় জেলায় বাংলাদেশ"] },
   { path: "/districts/1", expect: ["ঢাকা"] },
+  { path: "/districts/dhaka", expect: ["ঢাকা"] },
+  { path: "/places/lalbagh-fort", expect: ["লালবাগের কেল্লা", "জেলা শহর থেকে"] },
   { path: "/places", expect: ["গন্তব্যের তালিকা"] },
   { path: "/distance", expect: ["দূরত্ব মাপুন", "সরলরেখার দূরত্ব"] },
   { path: "/my-travel", expect: ["আমার ভ্রমণ"] },

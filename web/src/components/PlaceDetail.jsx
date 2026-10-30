@@ -21,6 +21,8 @@ export default function PlaceDetail({ place, onClose }) {
     district?.lat != null && place.lat != null
       ? haversineKm([district.lat, district.lon], [place.lat, place.lon])
       : null;
+  /* পাইপলাইনে আগে থেকেই হিসাব করা মান — না থাকলে এখানেই হিসাব হয় */
+  const distFromHq = typeof place.dist_from_hq_km === "number" ? place.dist_from_hq_km : null;
   const direction =
     live && place.lat != null ? compassLabel(bearingDeg([live.lat, live.lng], [place.lat, place.lon])) : null;
 
@@ -41,6 +43,15 @@ export default function PlaceDetail({ place, onClose }) {
           <span className="chip">{categoryLabel(place.category)}</span>
           <span className="chip">{place.district_bn}</span>
           {place.upazila_bn && <span className="chip">{place.upazila_bn}</span>}
+          {place.locality && <span className="chip">{place.locality}</span>}
+        </div>
+
+        {/* তথ্য যাচাই হয়েছে কি না — লেখক-যোগ করা গন্তব্যে গুরুত্বপূর্ণ */}
+        <div className="pd-verify">
+          <span className={`verify-flag ${place.verified === false ? "" : "ok"}`}>
+            {place.verified === false ? "তথ্য যাচাই বাকি" : "তথ্য যাচাইকৃত"}
+          </span>
+          {place.coord_source && <span className="muted small">অবস্থান: {place.coord_source}</span>}
         </div>
 
         <div className="pd-actions">
@@ -58,9 +69,12 @@ export default function PlaceDetail({ place, onClose }) {
           </button>
         </div>
 
-        <div className="tabs two">
+        <div className="tabs three">
           <button className={tab === "about" ? "active" : ""} onClick={() => setTab("about")}>
             পরিচিতি
+          </button>
+          <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>
+            ইতিহাস
           </button>
           <button className={tab === "distance" ? "active" : ""} onClick={() => setTab("distance")}>
             দূরত্ব
@@ -75,7 +89,35 @@ export default function PlaceDetail({ place, onClose }) {
             ) : (
               <p className="muted">এই গন্তব্যের বিস্তারিত পরিচিতি এখনো যোগ করা হয়নি।</p>
             )}
+
+            {place.how_to_go && (
+              <div className="pd-block">
+                <h5>কীভাবে যাবেন</h5>
+                <p>{place.how_to_go}</p>
+              </div>
+            )}
+            {place.best_time && (
+              <div className="pd-block">
+                <h5>কখন গেলে ভালো</h5>
+                <p>{place.best_time}</p>
+              </div>
+            )}
             {place.name_en && <p className="muted small">{place.name_en}</p>}
+          </div>
+        )}
+
+        {tab === "history" && (
+          <div className="pd-body">
+            {place.history ? (
+              place.history
+                .split(/\n{2,}|\r\n{2,}/)
+                .filter((x) => x.trim())
+                .map((para, i) => <p key={i}>{para.trim()}</p>)
+            ) : (
+              <p className="muted">
+                এই গন্তব্যের ইতিহাস এখনো লেখা হয়নি। এডমিন প্যানেল → গন্তব্য → এডিট থেকে যোগ করা যাবে।
+              </p>
+            )}
           </div>
         )}
 
@@ -95,8 +137,10 @@ export default function PlaceDetail({ place, onClose }) {
                 </dd>
               </div>
               <div>
-                <dt>জেলা সদর থেকে</dt>
-                <dd>{fromDistrict != null ? formatKm(fromDistrict) : "—"}</dd>
+                <dt>জেলা শহর থেকে</dt>
+                <dd>
+                  {distFromHq != null ? formatKm(distFromHq) : fromDistrict != null ? formatKm(fromDistrict) : "—"}
+                </dd>
               </div>
               <div>
                 <dt>স্থানাঙ্ক</dt>

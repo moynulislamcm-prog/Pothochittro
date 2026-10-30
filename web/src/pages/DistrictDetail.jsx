@@ -6,6 +6,8 @@ import PlaceDetail from "../components/PlaceDetail.jsx";
 import MapView from "../components/MapView.jsx";
 import { bn } from "../lib/format.js";
 import { haversineKm, formatKm } from "../lib/geo.js";
+import { useDocumentMeta, districtLd, breadcrumbLd, metaDescription } from "../lib/seo.js";
+import { findDistrict, districtPath as dPath, districtPathById } from "../lib/links.js";
 
 /** এক জেলার নির্দেশিকা — গন্তব্য, উপজেলা ও দূরত্ব */
 export default function DistrictDetail() {
@@ -17,7 +19,8 @@ export default function DistrictDetail() {
   const [tab, setTab] = useState("places");
   const [openPlace, setOpenPlace] = useState(null);
 
-  const district = content?.districts?.find((d) => d.id === id);
+  /* URL-এ slug বা id দুটোই আসতে পারে */
+  const district = findDistrict(content?.districts, id);
 
   const places = useMemo(
     () => (content?.places || []).filter((p) => p.district_id === id),
@@ -52,6 +55,31 @@ export default function DistrictDetail() {
 
   const visited = Boolean(travel?.visitedDistricts?.[district.id]);
   const wished = Boolean(travel?.wishlistDistricts?.[district.id]);
+
+  /* SEO — প্রতিটি জেলার নিজস্ব title, description ও structured data */
+  const districtUrl = dPath(district);
+  useDocumentMeta({
+    title: `${district.bn_name} জেলার দর্শনীয় স্থান — ইতিহাস ও মানচিত্র`,
+    description: metaDescription(
+      district.summary ||
+        `${district.bn_name} জেলার দর্শনীয় স্থান, ইতিহাস ও ভ্রমণ নির্দেশিকা। ${district.division || ""} বিভাগের এই জেলায় ${places.length}টি গন্তব্য রয়েছে।`,
+    ),
+    path: districtUrl,
+    jsonLd: {
+      "@context": "https://schema.org",
+      "@graph": (() => {
+        const d = districtLd(district, places);
+        const b = breadcrumbLd([
+          { name: "হোম", path: "/" },
+          { name: "৬৪ জেলা", path: "/districts" },
+          { name: district.bn_name, path: districtUrl },
+        ]);
+        delete d["@context"];
+        delete b["@context"];
+        return [d, b];
+      })(),
+    },
+  });
 
   const sorted = [...filtered].sort((a, b) => {
     if (!live) return a.name.localeCompare(b.name, "bn");
@@ -128,7 +156,7 @@ export default function DistrictDetail() {
           travel={travel}
           live={live}
           selectedId={district.id}
-          onSelectDistrict={(d) => navigate(`/districts/${d}`)}
+          onSelectDistrict={(d) => navigate(districtPathById(content?.districts, d))}
           showPlaces
           onOpenPlace={setOpenPlace}
           height="42vh"

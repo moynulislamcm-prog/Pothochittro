@@ -238,6 +238,28 @@ code { background: #f0ece4; padding: 1px 5px; border-radius: 5px; font-size: 0.8
 .map-tip span { font-size: 0.75rem; color: var(--ink-soft); }
 .map-tip em { font-style: normal; font-size: 0.75rem; color: var(--green); font-weight: 700; }
 
+/* জেলার নামের লেবেল — হালকা বেসম্যাপে যেন স্পষ্ট পড়া যায় */
+.map-label { background: none; border: none; }
+.map-label span {
+  display: inline-block; font-family: var(--font); font-size: 0.72rem; font-weight: 700;
+  color: #14453a; text-shadow: 0 0 3px #fff, 0 0 5px #fff, 0 1px 2px rgba(255,255,255,0.9);
+  white-space: nowrap; pointer-events: none; letter-spacing: 0.01em;
+}
+
+/* উপজেলার সীমানা কী অবস্থায় আছে তার নির্দেশক */
+.map-detail-hint {
+  position: absolute; right: 0.7rem; bottom: 0.7rem; z-index: 500;
+  background: rgba(255, 255, 255, 0.9); border-radius: 999px; padding: 0.28rem 0.7rem;
+  font-size: 0.72rem; color: var(--ink-soft); box-shadow: var(--shadow);
+  transition: color 0.2s ease, background 0.2s ease;
+}
+.map-detail-hint.on { color: var(--green); background: rgba(233, 244, 240, 0.95); font-weight: 600; }
+
+@media (max-width: 640px) {
+  .map-detail-hint { display: none; }
+  .map-label span { font-size: 0.66rem; }
+}
+
 .map-side { display: flex; flex-direction: column; gap: 0.8rem; }
 .side-card {
   background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
@@ -490,6 +512,21 @@ code { background: #f0ece4; padding: 1px 5px; border-radius: 5px; font-size: 0.8
 .pd-meta, .pd-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .pd-body p { color: var(--ink-soft); }
 .pd-body .lead { color: var(--ink); font-weight: 600; }
+.pd-body p + p { margin-top: 0.65rem; }
+
+/* যাচাই-চিহ্ন ও অবস্থানের উৎস */
+.pd-verify {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;
+}
+
+/* ইতিহাস/কীভাবে যাবেন — ব্লকভিত্তিক আলাদা অংশ */
+.pd-block {
+  margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--line);
+}
+.pd-block h5 {
+  color: var(--green-dark); margin: 0 0 0.3rem; font-size: 0.95rem; letter-spacing: 0.01em;
+}
+.pd-block p { margin: 0; }
 .dist-list { margin: 0; display: flex; flex-direction: column; gap: 0.45rem; }
 .dist-list div { display: flex; justify-content: space-between; gap: 0.8rem; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.45rem 0.75rem; }
 .dist-list dt { color: var(--ink-soft); font-size: 0.88rem; margin: 0; }
@@ -615,6 +652,17 @@ a.stat-card:hover { transform: translateY(-2px); }
 .popup-meta { font-size: 0.8rem; color: var(--ink-soft); }
 .popup-cat { font-size: 0.72rem; color: var(--amber-dark); font-weight: 700; }
 .popup-dist { font-size: 0.82rem; color: #1f4f8f; font-weight: 600; margin-top: 0.15rem; }
+.popup-warn {
+  display: inline-block; font-size: 0.72rem; color: #8a5a12; background: #fdf3e0;
+  border: 1px solid #eed9ae; border-radius: 6px; padding: 0.1rem 0.4rem; margin-top: 0.3rem;
+}
+/* লেখক-যোগ করা গন্তব্যের যাচাই-চিহ্ন (কার্ড ও বিস্তারিত পেজে) */
+.verify-flag {
+  display: inline-flex; align-items: center; gap: 0.28rem; font-size: 0.72rem;
+  color: #8a5a12; background: #fdf3e0; border: 1px solid #eed9ae;
+  border-radius: 999px; padding: 0.12rem 0.5rem;
+}
+.verify-flag.ok { color: #1c5c40; background: #e8f4ee; border-color: #bcdccd; }
 .popup img { border-radius: 8px; margin-top: 0.4rem; max-height: 110px; object-fit: cover; }
 .popup .btn { margin-top: 0.45rem; justify-content: center; }
 

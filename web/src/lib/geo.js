@@ -1,4 +1,5 @@
 import { OSRM_URL } from "../config.js";
+import { bn } from "./format.js";
 
 const R = 6371.0088; // পৃথিবীর গড় ব্যাসার্ধ (কিমি)
 const rad = (d) => (d * Math.PI) / 180;
@@ -18,11 +19,17 @@ export function haversineKm(a, b) {
 }
 
 /** দূরত্বকে পাঠযোগ্য রূপে */
+/**
+ * দূরত্ব বাংলা অঙ্কে প্রদর্শন।
+ * সাইটের বাকি সব সংখ্যা (গন্তব্য সংখ্যা, তারিখ) বাংলা অঙ্কে, তাই দূরত্বও তাই —
+ * অন্যথা একই পৃষ্ঠায় `২.৫ কিমি` আর `2.5 কিমি` মিশে যেত।
+ * এখানে রূপান্তর করায় ১৫টি কল-সাইট ও প্রি-রেন্ডার সবাই একসাথে ঠিক থাকে।
+ */
 export function formatKm(km) {
   if (km == null || Number.isNaN(km)) return "—";
-  if (km < 1) return `${Math.round(km * 1000)} মিটার`;
-  if (km < 10) return `${km.toFixed(1)} কিমি`;
-  return `${Math.round(km)} কিমি`;
+  if (km < 1) return bn(`${Math.round(km * 1000)} মিটার`);
+  if (km < 10) return bn(`${km.toFixed(1)} কিমি`);
+  return bn(`${Math.round(km)} কিমি`);
 }
 
 /**
