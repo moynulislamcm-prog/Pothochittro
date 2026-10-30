@@ -128,7 +128,16 @@ function districtsBody() {
 }
 
 function placesBody() {
-  const CAP = 300; // পৃষ্ঠা আকার নিয়ন্ত্রণে; বাকিগুলো জেলা পৃষ্ঠা থেকে পৌঁছানো যায়
+  // পৃষ্ঠা আকার নিয়ন্ত্রণে সীমা; বাকি গন্তব্যগুলো জেলা পৃষ্ঠা থেকে পৌঁছানো যায়।
+  // গুরুত্বপূর্ণ: districtBody প্রতিটি জেলার সব গন্তব্য কাটা ছাড়াই লিংক করে,
+  // তাই এখানে সীমা ছাড়ালেও পুরো তালিকা ক্রলযোগ্যই থাকে (SEO-র জন্য জরুরি)।
+  const CAP = 400;
+  if (places.length > CAP) {
+    console.warn(
+      `⚠ /places পৃষ্ঠায় ${places.length}টি গন্তব্যের মধ্যে প্রথম ${CAP}টি দেখানো হচ্ছে। ` +
+        `বাকি ${places.length - CAP}টি শুধু জেলা পৃষ্ঠা থেকে পৌঁছানো যাবে।`,
+    );
+  }
   let out = `<main class="page"><header class="page-head"><div>
     <span class="kicker">${bn(places.length)}টি দর্শনীয় স্থান</span>
     <h1>গন্তব্যের তালিকা</h1>
