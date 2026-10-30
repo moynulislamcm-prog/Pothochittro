@@ -21,3 +21,6 @@ Thumbs.db
 *.sqlite
 *.db
 .smoke/
+
+# সিডিং টোকেন — কখনো কমিট করা যাবে না (Supabase Secrets-এ SEED_TOKEN)
+supabase/.seed-token
