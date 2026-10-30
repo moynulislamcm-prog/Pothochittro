@@ -231,7 +231,15 @@ function normalizePlace(p, source) {
 
   let lat = typeof p.lat === "number" ? p.lat : null;
   let lon = typeof p.lon === "number" ? p.lon : null;
-  let coordSource = p.lat != null ? (source === "authored" ? "লেখক" : "মূল ডেটা") : "উপজেলা-কেন্দ্র";
+  // "লেখক" মানটি আঠালো (sticky) রাখা হয়। নাহলে স্ক্রিপ্ট দ্বিতীয়বার চললে
+  // গন্তব্যগুলো places.json থেকে "বিদ্যমান" হিসেবে পড়া হতো, source আর
+  // "authored" থাকত না, এবং সংরক্ষিত "লেখক" মানটি চুপচাপ "মূল ডেটা"-তে
+  // বদলে যেত। ফলে তৃতীয় রানে সুরক্ষা চিহ্ন হারিয়ে দ্বীপগুলো আবার
+  // উপজেলা-কেন্দ্রে স্ন্যাপ হতো (১ → ১২ → ৭ এই দোলাচলটাই ঘটছিল)।
+  let coordSource =
+    p.coord_source === "লেখক" ? "লেখক"
+    : p.lat != null ? (source === "authored" ? "লেখক" : "মূল ডেটা")
+    : "উপজেলা-কেন্দ্র";
 
   // উপজেলার নাম শনাক্ত
   let upazilaName = canon(p.upazila_bn || p.upazila || p.thana || "");
@@ -255,7 +263,11 @@ function normalizePlace(p, source) {
     // শাহপরীর দ্বীপ ও সাবরাং — তিনটি আলাদা দ্বীপ একই বিন্দুতে গাদা হয়ে
     // গিয়েছিল এবং আসল অবস্থান নষ্ট হয়েছিল।
     // স্ন্যাপের বদলে পতাকা তোলা হয়, যাতে ভুল স্থানাঙ্ক মানুষ পর্যালোচনা করতে পারে।
-    if (source === "authored") {
+    // গুরুত্বপূর্ণ: রেকর্ডের নিজের coord_source দেখা হয়, এই পাসের উৎস নয়।
+    // কারণ স্ক্রিপ্ট আবার চললে আগের রানের লেখক-গন্তব্যগুলো places.json থেকে
+    // "বিদ্যমান" হিসেবেই পড়া হয় — তখন source পরীক্ষা করলে প্রতিবার বিল্ডে
+    // একই ৬টি দ্বীপ/সৈকত আবার কেন্দ্রে সরে যেত এবং ডেটা চুপচাপ নষ্ট হতো।
+    if (source === "authored" || p.coord_source === "লেখক") {
       outsideKept.push({ name, district: d.bn_name, lat, lon });
     } else {
       // মূল ডেটার সন্দেহজনক বিন্দু → উপজেলার কেন্দ্রে সরানো হলো, রেকর্ডসহ
@@ -464,10 +476,11 @@ report += `সমৃদ্ধ: **${enriched.length}** (বিদ্যমান 
 report += `জেলা শহর থেকে দূরত্ব আছে: ${withDist}/${places.length}\n\n`;
 report += `## বিভাগ\n\n`;
 for (const c of [...catCount.entries()].sort((a, b) => b[1] - a[1])) report += `- ${c[0]}: ${c[1]}\n`;
-if (outsideKept.length) {
-  report += `\n## সীমানার বাইরে, তবে লেখকের স্থানাঙ্ক রাখা হয়েছে (${outsideKept.length})\n\n`;
+const outsideKeptUnique = [...new Map(outsideKept.map((o) => [`${o.district}|${o.name}`, o])).values()];
+if (outsideKeptUnique.length) {
+  report += `\n## সীমানার বাইরে, তবে লেখকের স্থানাঙ্ক রাখা হয়েছে (${outsideKeptUnique.length})\n\n`;
   report += `এগুলো ইচ্ছাকৃতভাবে সরানো হয়নি — দ্বীপ, সৈকত ও সমুদ্রতীরের গন্তব্য সরলীকৃত স্থল-পলিগনের বাইরে পড়াটাই স্বাভাবিক।\nতবু ভুল স্থানাঙ্ক থাকলে এখানে চোখ বোলানো দরকার।\n\n| গন্তব্য | জেলা | স্থানাঙ্ক |\n|---|---|---|\n`;
-  for (const o of outsideKept)
+  for (const o of outsideKeptUnique)
     report += `| ${o.name} | ${o.district} | ${o.lat}, ${o.lon} |\n`;
 }
 
@@ -487,6 +500,6 @@ console.log("— গন্তব্য তৈরি —");
 console.log("মোট        :", places.length, `(মূল ${existingCount} + নতুন ${added})`);
 console.log("সমৃদ্ধ     :", enriched.length);
 console.log("দূরত্ব যুক্ত :", withDist);
-console.log("স্ন্যাপ      :", snapped.length, "| সীমানার বাইরে (রাখা):", outsideKept.length, "| সমস্যা:", flagged.length, "| আগেই প্রয়োগ:", alreadyApplied.length);
+console.log("স্ন্যাপ      :", snapped.length, "| সীমানার বাইরে (রাখা):", outsideKeptUnique.length, "| সমস্যা:", flagged.length, "| আগেই প্রয়োগ:", alreadyApplied.length);
 const top = [...catCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
 console.log("বিভাগ      :", top.map(([k, v]) => `${k}=${v}`).join(", "));
