@@ -24,6 +24,12 @@ const canon = (s) =>
     : "";
 const key = (s) => canon(s).replace(/[\sঃ.\-–—]/g, "");
 
+/** ইংরেজি নামের তুলনা-কী: ছোট হরফ, শুধু ইংরেজি অক্ষর ও সংখ্যা */
+const ekey = (s) => key(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** ইংরেজি নামের টোকেন সেট — আংশিক মিলের জন্য */
+const etokens = (s) => new Set(String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+
 /** SEO-বান্ধব URL অংশ — ইংরেজি নাম থেকে, ছোট হরফে, ড্যাশ যুক্ত */
 function slugify(value, fallback) {
   const base = String(value || "")
@@ -118,19 +124,18 @@ function districtHq(id) {
   return districtCentroid.get(String(id)) || null;
 }
 
-/* উপজেলা পলিগনের কেন্দ্রবিন্দু — জেলা অনুযায়ী সূচি */
-const upazilaCentroid = new Map(); // "districtId|key(name)" -> [lat,lon]
+/* উপজেলা পলিগনের সূচি — জেলা অনুযায়ী */
 const upazilaFeaturesByDistrict = new Map(); // districtId -> [feature]
 const upazilaFeatureByName = new Map(); // "districtId|key(name)" -> feature
 if (upazilaBounds) {
   for (const f of upazilaBounds.features) {
     const did = String(f.properties.district_id);
     const nm = key(f.properties.bn_name || f.properties.name);
-    const c = centroid(f.geometry);
-    if (!nm || !c) continue;
-    upazilaCentroid.set(`${did}|${nm}`, c);
-    // একই নামে একাধিক পলিগন থাকলে প্রথমটিই রাখা হয়, যাতে
-    // upazilaCentroid-এর আচরণের সাথে মিল থাকে (দুটো একই ক্রমে লেখে)।
+    // কেন্দ্রবিন্দু বের না হলে (অবক্ষয়িত পলিগন) পুরো পলিগনটিই বাদ পড়ে —
+    // এই গার্ডটি সূচিতে কোন কোন পলিগন ঢুকবে তা ঠিক করে, তাই রাখা জরুরি।
+    // কেন্দ্রবিন্দু পরে cachedCentroid() দিয়ে অলসভাবে হিসাব হয়।
+    if (!nm || !centroid(f.geometry)) continue;
+    // একই নামে একাধিক পলিগন থাকলে প্রথমটিই রাখা হয়, যাতে ক্রম নির্ণায়ক থাকে।
     if (!upazilaFeatureByName.has(`${did}|${nm}`)) upazilaFeatureByName.set(`${did}|${nm}`, f);
     if (!upazilaFeaturesByDistrict.has(did)) upazilaFeaturesByDistrict.set(did, []);
     upazilaFeaturesByDistrict.get(did).push(f);
@@ -139,6 +144,61 @@ if (upazilaBounds) {
 
 /* আমার উপজেলা তালিকার কেন্দ্রবিন্দু (পলিগনে না মিললে নাম মিলিয়ে) */
 const upazilaById = new Map(upazilas.map((u) => [String(u.id), u]));
+
+/* --- ইংরেজি নামে উপজেলা পলিগন মেলানো -------------------------------------
+   geojson-এর ১১৮টি পলিগনে bn_name খালি (নাম ইংরেজিতে, inferred:true)। ফলে
+   upazilaFeatureByName-এর কী হয়ে যায় ইংরেজি নাম, অথচ খোঁজ চলে বাংলা নাম
+   দিয়ে — কখনোই মেলে না। এতে ১৩০টি উপজেলা "পলিগনবিহীন" মনে হতো, অথচ আসলে
+   ৭৬টির পলিগন ইংরেজি নামে বা ভিন্ন বানানে ঠিকই আছে:
+     কুমিল্লা সদর → Comilla Adarsha Sadar | হাটহাজারী → হাঠহাজারী
+     লোহাগাড়া → লোহাগারা | মীরসরাই → মিরসরাই | কক্সবাজার সদর → Cox's Bazar Sadar
+   তাই upazilas.json-এর ইংরেজি নাম দিয়েও মেলানো হয়। এতে ওইসব উপজেলার
+   নতুন গন্তব্য জেলা-কেন্দ্রের আসন্ন মানের বদলে নিজের উপজেলার ভেতরেই পড়ে।
+
+   নিরাপত্তা: একই জেলায় একই ইংরেজি কী একাধিক পলিগনে মিললে সেটি অস্পষ্ট
+   ধরে বাতিল করা হয় (সিলেটে দুটি "Companiganj" পলিগন আছে)। ভুল উপজেলার
+   পলিগনে গন্তব্য বসানোর চেয়ে আসন্ন মান ভালো — ভুল মিল নীরবে ডেটা নষ্ট করে।
+   ------------------------------------------------------------------------- */
+const AMBIGUOUS = Symbol("ambiguous-upazila");
+const upazilaFeatureByEn = new Map(); // "districtId|ekey(name)" -> feature | AMBIGUOUS
+if (upazilaBounds) {
+  for (const f of upazilaBounds.features) {
+    const ek = ekey(f.properties.name || "");
+    if (!ek) continue;
+    const k2 = `${f.properties.district_id}|${ek}`;
+    if (upazilaFeatureByEn.has(k2)) upazilaFeatureByEn.set(k2, AMBIGUOUS);
+    else upazilaFeatureByEn.set(k2, f);
+  }
+}
+/* upazilas.json-এর রেকর্ড (ইংরেজি নাম বের করতে) — জেলা+বাংলা নাম দিয়ে সূচি */
+const upazilaByDistBn = new Map();
+for (const u of upazilas) {
+  const kb = key(u.bn_name || "");
+  if (!kb) continue;
+  const k2 = `${u.district_id}|${kb}`;
+  if (!upazilaByDistBn.has(k2)) upazilaByDistBn.set(k2, u);
+}
+/** উপজেলা রেকর্ড খোঁজে — আইডি দিয়ে, নাহলে জেলা+বাংলা নাম দিয়ে */
+function upazilaRecordFor(districtId, upazilaName, upazilaId) {
+  if (upazilaId) {
+    const u = upazilaById.get(String(upazilaId));
+    if (u && String(u.district_id) === String(districtId)) return u;
+  }
+  if (upazilaName) return upazilaByDistBn.get(`${districtId}|${key(upazilaName)}`) || null;
+  return null;
+}
+
+/* কেন্দ্রবিন্দুর ক্যাশ — একই পলিগনের জন্য বারবার গণনা এড়াতে */
+const centroidCache = new WeakMap();
+function cachedCentroid(geometry) {
+  if (!geometry) return null;
+  let c = centroidCache.get(geometry);
+  if (c === undefined) {
+    c = centroid(geometry);
+    centroidCache.set(geometry, c);
+  }
+  return c;
+}
 
 /* ---------------------------------------------------------------------------
    নতুন গন্তব্যের জন্য উপজেলার পলিগনের ভেতরে পৃথক বিন্দু ছড়ানো
@@ -180,6 +240,16 @@ function mulberry32(a) {
   };
 }
 
+/* ছড়ানোর বলয় সংখ্যা। প্রতি বলয় ~২৪৫ মিটার।
+   SCATTER_MAX_RINGS (৪৮) ≈ ১১.৮ কিমি — উপজেলার নিজের পলিগনের ভেতরে,
+   তাই পুরো উপজেলা জুড়ে ছড়ানো নিরাপদ।
+   DISTRICT_FALLBACK_RINGS (১০) ≈ ২.৫ কিমি — উপজেলার পলিগন না মিললে
+   ইচ্ছাকৃতভাবে ছোট রাখা হয়: উপজেলার আসল অবস্থান তখন জানাই নেই, তাই
+   পুরো জেলায় ছড়ালে জেলা শহর থেকে ভুল দূরত্ব দেখাত। ছোট ব্যাসার্ধে
+   গন্তব্যগুলো আলাদা মার্কার পায় কিন্তু "জেলা-কেন্দ্র" দাবিটিও সত্য থাকে। */
+const SCATTER_MAX_RINGS = 48;
+const DISTRICT_FALLBACK_RINGS = 10;
+
 /**
  * পলিগনের ভেতরে কেন্দ্র থেকে ছড়িয়ে একটি পৃথক বিন্দু খোঁজে।
  * ক্রমবর্ধমান ব্যাসার্ধের বলয়ে খোঁজে এবং প্রথম বিন্দুটিই নেয় যা
@@ -187,7 +257,7 @@ function mulberry32(a) {
  * সীমানার ভেতরেই থাকে, ভুল উপজেলা বা জেলায় পড়ে না।
  * ভেতরে জায়গা না পেলে কেন্দ্রেই ফিরে আসে (তখন গাদা লাগলেও ভুল অবস্থান নয়)।
  */
-function scatterInGeometry(geometry, center, seedStr) {
+function scatterInGeometry(geometry, center, seedStr, maxRings = SCATTER_MAX_RINGS) {
   if (!center) return null;
   if (!geometry) return center;
   const rnd = mulberry32(seedFrom(seedStr));
@@ -196,7 +266,7 @@ function scatterInGeometry(geometry, center, seedStr) {
   // দ্রাঘিমাংশকে cos(অক্ষাংশ) দিয়ে ভাগ করলে ছড়ানোটি বাস্তব দূরত্বে
   // প্রায় বৃত্তাকার হয় — না করলে পূর্ব-পশ্চিমে সংকুচিত দেখাত।
   const lonStretch = 1 / Math.max(0.35, Math.cos(rad(center[0])));
-  for (let r = 1; r <= 48; r++) {
+  for (let r = 1; r <= maxRings; r++) {
     const steps = Math.min(8 + r * 2, 56);
     for (let s = 0; s < steps; s++) {
       const angle = baseAngle + (s / steps) * Math.PI * 2;
@@ -209,58 +279,86 @@ function scatterInGeometry(geometry, center, seedStr) {
   return center;
 }
 
-/** upazilaCenter-এর হুবহু একই fallback চেইন অনুসরণ করে উপজেলার পলিগন খোঁজে */
-function upazilaFeatureFor(districtId, upazilaName, upazilaId) {
+/**
+ * উপজেলার পলিগন খোঁজার একটিমাত্র সমাধান-ক্রম।
+ *
+ * কেন একটি ফাংশনে: আগে কেন্দ্রবিন্দু (upazilaCenter) ও পলিগন
+ * (upazilaFeatureFor) দুটি আলাদা ক্রম অনুসরণ করত। দুটো ভিন্ন পলিগন বেছে
+ * নিলে কেন্দ্রবিন্দু এক উপজেলার আর ছড়ানো হতো অন্য উপজেলার ভেতরে —
+ * ফলাফল হতো সীমানার বাইরের বিন্দু। এখন দুটোই এখান থেকেই আসে।
+ *
+ * ফেরত: { f, kind } — kind ∈ "bn-exact" | "en-exact" | "bn-substr" |
+ * "en-tokens" | null (কোনো পলিগন মেলেনি)।
+ */
+function resolveUpazilaFeature(districtId, upazilaName, upazilaId) {
   const did = String(districtId);
+
+  // ১. বাংলা নামে হুবহু মিল
   if (upazilaName) {
     const f = upazilaFeatureByName.get(`${did}|${key(upazilaName)}`);
-    if (f) return f;
+    if (f) return { f, kind: "bn-exact" };
   }
   if (upazilaId) {
     const u = upazilaById.get(String(upazilaId));
     if (u) {
       const f = upazilaFeatureByName.get(`${did}|${key(u.bn_name)}`);
-      if (f) return f;
+      if (f) return { f, kind: "bn-exact" };
     }
   }
+
+  // ২. upazilas.json-এর ইংরেজি নাম দিয়ে — যেসব পলিগনে bn_name খালি
+  const rec = upazilaRecordFor(did, upazilaName, upazilaId);
+  const en = rec ? ekey(rec.name || "") : "";
+  if (en) {
+    const hit = upazilaFeatureByEn.get(`${did}|${en}`);
+    // AMBIGUOUS হলে ইচ্ছাকৃতভাবে এড়িয়ে যাওয়া হয়: ভুল উপজেলার পলিগনে
+    // গন্তব্য বসানোর চেয়ে জেলা-কেন্দ্রের আসন্ন মান ভালো, কারণ ভুল মিল
+    // নীরবে ডেটা নষ্ট করে আর ধরাও পড়ে না।
+    if (hit && hit !== AMBIGUOUS) return { f: hit, kind: "en-exact" };
+  }
+
+  // ৩. বাংলা নামে আংশিক মিল (বানানের ভিন্নতা সামলাতে)
   if (upazilaName) {
     const want = key(upazilaName);
     const feats = upazilaFeaturesByDistrict.get(did) || [];
     for (const f of feats) {
       const nm = key(f.properties.bn_name || f.properties.name);
       if (!nm) continue;
-      if (nm.includes(want) || want.includes(nm)) return f;
+      if (nm.includes(want) || want.includes(nm)) return { f, kind: "bn-substr" };
     }
   }
-  return null;
+
+  // ৪. ইংরেজি টোকেন-উপসেট — শুধু তখনই যখন একমাত্র প্রার্থী
+  //    (যেমন Khagrachhari ⊂ "Khagrachhari Sadar")
+  const ut = rec ? etokens(rec.name || "") : new Set();
+  if (ut.size) {
+    const feats = upazilaFeaturesByDistrict.get(did) || [];
+    const cands = feats.filter((f) => {
+      const ft = etokens(f.properties.name || "");
+      if (!ft.size) return false;
+      for (const t of ut) if (!ft.has(t)) return false;
+      return true;
+    });
+    if (cands.length === 1) return { f: cands[0], kind: "en-tokens" };
+  }
+
+  return { f: null, kind: null };
+}
+
+/** উপজেলার পলিগন (না পেলে null) */
+function upazilaFeatureFor(districtId, upazilaName, upazilaId) {
+  return resolveUpazilaFeature(districtId, upazilaName, upazilaId).f;
 }
 
 /** উপজেলার কেন্দ্রবিন্দু খোঁজে — পলিগন থেকে, না পেলে জেলার কেন্দ্র */
 function upazilaCenter(districtId, upazilaName, upazilaId) {
   const did = String(districtId);
-  if (upazilaName) {
-    const direct = upazilaCentroid.get(`${did}|${key(upazilaName)}`);
-    if (direct) return { point: direct, exact: true };
-  }
-  if (upazilaId) {
-    const u = upazilaById.get(String(upazilaId));
-    if (u) {
-      const byId = upazilaCentroid.get(`${did}|${key(u.bn_name)}`);
-      if (byId) return { point: byId, exact: true };
-    }
-  }
-  // আংশিক মিল (বানানের ভিন্নতা সামলাতে)
-  if (upazilaName) {
-    const want = key(upazilaName);
-    const feats = upazilaFeaturesByDistrict.get(did) || [];
-    for (const f of feats) {
-      const nm = key(f.properties.bn_name || f.properties.name);
-      if (!nm) continue;
-      if (nm.includes(want) || want.includes(nm)) {
-        const c = centroid(f.geometry);
-        if (c) return { point: c, exact: false };
-      }
-    }
+  const { f, kind } = resolveUpazilaFeature(did, upazilaName, upazilaId);
+  if (f) {
+    const c = cachedCentroid(f.geometry);
+    // bn-substr আংশিক মিল, তাই সেটি এখনও আসন্ন ধরা হয়; বাকি তিনটি
+    // কৌশল উপজেলার নিজের পলিগন শনাক্ত করে, তাই exact।
+    if (c) return { point: c, exact: kind !== "bn-substr" };
   }
   const dc = districtCentroid.get(did);
   return dc ? { point: dc, exact: false } : { point: null, exact: false };
@@ -418,18 +516,24 @@ function normalizePlace(p, source) {
     lat = c.point[0]; lon = c.point[1];
     coordSource = c.exact ? "উপজেলা-কেন্দ্র" : "জেলা-কেন্দ্র";
     // একই উপজেলার নতুন গন্তব্যগুলো যেন হুবহু একই বিন্দুতে গাদা না হয়।
-    // শুধু তখনই ছড়ানো হয় যখন উপজেলার নিজস্ব পলিগন পাওয়া গেছে (c.exact) —
-    // জেলা-কেন্দ্র fallback-এ ছড়ালে পুরো জেলা জুড়ে ভুল অবস্থান তৈরি হতো,
-    // তাই তখন কেন্দ্রেই রাখা হয় (গাদা লাগলেও ভুল ঠিকানা নয়)।
+    // ছড়ানোর সিদ্ধান্ত এখন c.exact-এর বদলে "উপজেলার পলিগন পাওয়া গেছে কি
+    // না" তার ওপর — নাহলে বানানের ভিন্নতায় পলিগন মিললেও (bn-substr) ছড়ানো
+    // চলত না, আর গন্তব্যগুলো একই বিন্দুতে গাদা হয়ে ম্যাপ অকেজো হতো।
     // বিদ্যমান গন্তব্যে এই শাখা কখনো চলে না, কারণ তাদের lat/lon সংরক্ষিত
     // আছে; আর enrichPlace স্থানাঙ্ক বদলায় না যতক্ষণ override_coords না থাকে।
-    if (c.exact) {
-      const uf = upazilaFeatureFor(districtId, upazilaName, p.upazila_id);
-      const s = scatterInGeometry(
-        uf && uf.geometry,
-        [lat, lon],
-        `${districtId}|${key(upazilaName || "")}|${key(name)}`,
-      );
+    const uf = upazilaFeatureFor(districtId, upazilaName, p.upazila_id);
+    const seedStr = `${districtId}|${key(upazilaName || "")}|${key(name)}`;
+    if (uf) {
+      // উপজেলার নিজের পলিগন পাওয়া গেছে → তার ভেতরেই ছড়ানো হয়, তাই
+      // বিন্দুটি কখনো ভুল উপজেলায় পড়ে না।
+      const s = scatterInGeometry(uf.geometry, [lat, lon], seedStr);
+      if (s) { lat = s[0]; lon = s[1]; }
+    } else if (feat) {
+      // উপজেলার পলিগন মেলেনি (৪৯২টির মধ্যে ৫৬টি) → জেলা-কেন্দ্রের আশপাশে
+      // ছোট ব্যাসার্ধে ছড়ানো হয়, যাতে একই উপজেলার গন্তব্যগুলো আলাদা মার্কার
+      // পায়। ব্যাসার্ধ ছোট রাখাই ইচ্ছাকৃত — উপজেলার আসল অবস্থান জানা নেই,
+      // তাই পুরো জেলায় ছড়ালে জেলা শহর থেকে ভুল দূরত্ব দেখাত।
+      const s = scatterInGeometry(feat.geometry, [lat, lon], seedStr, DISTRICT_FALLBACK_RINGS);
       if (s) { lat = s[0]; lon = s[1]; }
     }
     inOwnDistrict = true;
