@@ -1,0 +1,45 @@
+# Netlify কনফিগ — রিপোর রুটে
+#
+# ওয়েব অ্যাপটি web/ সাব-ডিরেক্টরিতে, তাই base সেট করা হয়েছে।
+# Netlify UI-তে Base directory ফাঁকা (অর্থাৎ রিপো রুট) রাখলে এই ফাইলটি কাজ করবে।
+# UI-তে Base directory = web দিয়ে থাকলে web/netlify.toml ব্যবহার হবে।
+
+[build]
+  base = "web"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 6-এর জন্য Node 18+ দরকার; Netlify-র পুরোনো ডিফল্ট এড়িয়ে আটকে দেওয়া হলো
+  NODE_VERSION = "20"
+
+# Supabase-এর ঠিকানা ও পাবলিশেবল কী src/config.js-এ ডিফল্ট হিসেবে আছে,
+# তাই Netlify-তে আলাদা করে env ভেরিয়েবল বসাতে হবে না।
+# অন্য Supabase প্রজেক্টে নিতে চাইলে এগুলো খুলে দিন:
+#  VITE_SUPABASE_URL = "https://oxziyvshobedekqobyyo.supabase.co"
+#  VITE_SUPABASE_ANON_KEY = "sb_publishable_wuHnyuPIThfzbjSvnn8oPA_Zow9ceYb"
+
+# একক-পেজ অ্যাপ (SPA): /districts, /admin, /my-travel ইত্যাদি রাউট
+# সার্ভারে ফাইল হিসেবে নেই — সব অনুরোধ index.html এ পাঠাতে হবে,
+# নইলে রিফ্রেশ বা সরাসরি লিংক খোলার সময় 404 দেখাবে।
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# বিল্ড আউটপুটের স্থির সম্পদ দীর্ঘমেয়াদি ক্যাশ (ফাইলনামে হ্যাশ থাকায় নিরাপদ)
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# ডেটা ও ছবি — মাঝারি ক্যাশ, যাতে এডমিন প্যানেল থেকে হালনাগাদ করলে দ্রুত ফুটে
+[[headers]]
+  for = "/data/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

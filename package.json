@@ -1,0 +1,16 @@
+{
+  "name": "pothochittro",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "পথচিত্র — বাংলাদেশের ৬৪ জেলার দর্শনীয় স্থান, ইতিহাস ও মানচিত্র",
+  "scripts": {
+    "build:data": "node scripts/build-data.mjs",
+    "build:boundaries": "node scripts/build-boundaries.mjs",
+    "build:places": "node scripts/build-places.mjs",
+    "build:all": "node scripts/build-data.mjs && node scripts/build-boundaries.mjs && node scripts/build-places.mjs"
+  },
+  "devDependencies": {
+    "simplify-js": "^1.2.4"
+  }
+}

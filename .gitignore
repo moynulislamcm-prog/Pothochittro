@@ -1,0 +1,26 @@
+# ডেপেন্ডেন্সি ও বিল্ড
+node_modules/
+dist/
+build/
+.vite/
+
+# মধ্যবর্তী ফাইল (পুরনো HTML থেকে ডেটা বের করার সময় তৈরি হয়)
+.extract/
+
+# লোকাল এনভায়রনমেন্ট
+.env
+.env.local
+.env.*.local
+
+# লগ ও ওএস ফাইল
+*.log
+.DS_Store
+Thumbs.db
+
+# লোকাল ডেটাবেস (যদি অন্য ব্যাকএন্ড ব্যবহার করা হয়)
+*.sqlite
+*.db
+.smoke/
+
+# সিডিং টোকেন — কখনো কমিট করা যাবে না (Supabase Secrets-এ SEED_TOKEN)
+supabase/.seed-token

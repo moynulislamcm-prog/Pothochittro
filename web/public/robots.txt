@@ -1,0 +1,12 @@
+# পথচিত্র — সব ক্রলারকে স্বাগত
+User-agent: *
+Allow: /
+
+# ব্যক্তিগত ও প্রশাসনিক অংশ — সূচিভুক্ত করার দরকার নেই
+Disallow: /admin
+Disallow: /my-travel
+
+# মানচিত্রের বড় ফাইলগুলো সূচিভুক্ত করার প্রয়োজন নেই
+Disallow: /data/upazila-boundaries.geojson
+
+Sitemap: https://pothochittro.netlify.app/sitemap.xml
