@@ -7,6 +7,14 @@ import { CATEGORY_ORDER, categoryLabel, bn } from "../lib/format.js";
 import { haversineKm } from "../lib/geo.js";
 import { useDocumentMeta, breadcrumbLd, metaDescription } from "../lib/seo.js";
 
+/**
+ * একবারে কতটি কার্ড দেখানো হবে।
+ * হাজার হাজার গন্তব্য থাকলে পুরো তালিকা একসাথে রেন্ডার করলে DOM বিশাল
+ * ও ধীর হয়ে যায়, তাই তালিকা ধাপে ধাপে খোলা হয় — ফিল্টার বদলালে ধাপ
+ * শূন্য থেকে আবার শুরু হয়, ফলে খোঁজ সবসময় দ্রুত থাকে।
+ */
+const PAGE_STEP = 60;
+
 /** সব গন্তব্য — ধরন, জেলা, উপজেলা ও খোঁজ দিয়ে ফিল্টার */
 export default function Places() {
   const { content, live } = useApp();
@@ -18,6 +26,7 @@ export default function Places() {
   const [upazila, setUpazila] = useState("all");
   const [sortBy, setSortBy] = useState("name");
   const [openPlace, setOpenPlace] = useState(null);
+  const [visible, setVisible] = useState(PAGE_STEP);
 
   const places = content?.places || [];
   const districts = content?.districts || [];
@@ -43,6 +52,11 @@ export default function Places() {
     next.delete("focus");
     setParams(next, { replace: true });
   }, [params, places, setParams]);
+
+  /* ফিল্টার বা সাজানোর ধরন বদলালে আবার প্রথম ধাপ থেকে দেখানো */
+  useEffect(() => {
+    setVisible(PAGE_STEP);
+  }, [query, category, districtId, upazila, sortBy]);
 
   const upazilaOptions = useMemo(() => {
     if (districtId === "all") return [];
@@ -161,10 +175,21 @@ export default function Places() {
         </div>
       ) : (
         <section className="pgrid">
-          {filtered.map((p) => (
+          {filtered.slice(0, visible).map((p) => (
             <PlaceCard key={p.id} place={p} live={live} onOpen={setOpenPlace} />
           ))}
         </section>
+      )}
+
+      {filtered.length > visible && (
+        <div className="load-more">
+          <button
+            className="btn ghost"
+            onClick={() => setVisible((v) => v + PAGE_STEP)}
+          >
+            আরও দেখুন — বাকি {bn(filtered.length - visible)}টি
+          </button>
+        </div>
       )}
 
       {openPlace && <PlaceDetail place={openPlace} onClose={() => setOpenPlace(null)} />}

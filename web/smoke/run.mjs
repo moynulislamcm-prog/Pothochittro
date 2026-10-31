@@ -187,6 +187,62 @@ for (const route of ROUTES) {
   result.container.remove();
 }
 
+/* ---------- গন্তব্য তালিকার ধাপে ধাপে রেন্ডারিং ---------- */
+/* হাজার হাজার গন্তব্য যুক্ত হলেও হাব পৃষ্ঠা যেন সীমিত সংখ্যক কার্ড দিয়ে শুরু
+   করে এবং বাকিগুলো "আরও দেখুন" দিয়ে খোলা যায়। PAGE_STEP হার্ডকোড করা হয়নি —
+   তার বদলে নিয়মটি হলো: তালিকা PAGINATION_THRESHOLD-এর চেয়ে বড় হলে পেজিনেশন
+   বাধ্যতামূলক। ফলে কেউ slice() সরিয়ে দিলেও এই চেক ধরে ফেলবে, আবার ধাপের মান
+   বদলালে ভাঙবে না। */
+problems.length = 0;
+{
+  const PAGINATION_THRESHOLD = 120;
+  const allPlaces = JSON.parse(fs.readFileSync(path.join(publicDir, "data", "places.json"), "utf8"));
+  const result = await mount("/places");
+  const html = result.container.innerHTML;
+  /* কার্ডের মূল উপাদান <article class="pcard …"> — শুধু "pcard" খুঁজলে
+     ভেতরের pcard-body / pcard-tags / pcard-actions / pcard-img-ও গুনে ফেলে,
+     তাই <article-এ নোঙর করা হয়। */
+  const shown = (html.match(/<article class="pcard/g) || []).length;
+  const remaining = allPlaces.length - shown;
+  const hasButton = html.includes("আরও দেখুন");
+  const fmt = await import("../src/lib/format.js");
+
+  const issues = [];
+  if (shown === 0) issues.push("কোনো কার্ডই রেন্ডার হয়নি");
+  if (shown > allPlaces.length) issues.push(`কার্ড (${shown}) মোট গন্তব্যের (${allPlaces.length}) চেয়ে বেশি`);
+
+  if (allPlaces.length > PAGINATION_THRESHOLD) {
+    // বড় তালিকা: সব কার্ড একসাথে রেন্ডার হওয়া মানে DOM অবাঞ্ছিতভাবে বিশাল হবে
+    if (remaining <= 0) {
+      issues.push(
+        `${allPlaces.length}টি গন্তব্যের সব ${shown}টিই একসাথে রেন্ডার হয়েছে — পেজিনেশন কাজ করছে না`,
+      );
+    } else if (!hasButton) {
+      issues.push(`বাকি ${remaining}টি থাকলেও "আরও দেখুন" বোতাম নেই`);
+    } else {
+      const wantRemaining = `বাকি ${fmt.bn(remaining)}টি`;
+      if (!html.includes(wantRemaining)) issues.push(`বোতামে "${wantRemaining}" লেখা নেই`);
+    }
+  } else if (remaining > 0 || hasButton) {
+    issues.push(`ছোট তালিকায় (${allPlaces.length}টি) পেজিনেশন অপ্রত্যাশিত`);
+  }
+
+  if (problems.length) issues.push("কনসোল সমস্যা: " + [...new Set(problems)].slice(0, 3).join(" / "));
+
+  if (issues.length === 0) {
+    console.log(
+      `✓ ধাপে ধাপে তালিকা      ${fmt.bn(shown)}টি কার্ড দেখানো হচ্ছে (মোট ${fmt.bn(allPlaces.length)}টি)` +
+        (remaining > 0 ? `, বাকি ${fmt.bn(remaining)}টি বোতামে` : `, সব দেখানো হয়েছে`),
+    );
+  } else {
+    console.log(`✗ ধাপে ধাপে তালিকা      ${issues.join("; ")}`);
+    failed++;
+  }
+
+  await unmount(result.root);
+  result.container.remove();
+}
+
 /* ---------- ভ্রমণতালিকা লজিক ---------- */
 problems.length = 0;
 const travel = await import("../src/lib/travel.js");

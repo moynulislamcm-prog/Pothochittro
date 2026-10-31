@@ -569,6 +569,7 @@ a.card.link-card:hover { border-color: #a9d3c4; }
   padding: 1.6rem; text-align: center; color: var(--ink-soft);
 }
 .empty .btn { margin-top: 0.6rem; }
+.load-more { display: flex; justify-content: center; margin-top: 1.2rem; }
 .notice-card { text-align: center; }
 
 /* ---------- ফুটার ---------- */
