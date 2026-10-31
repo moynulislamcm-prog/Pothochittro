@@ -24,11 +24,30 @@ const canon = (s) =>
     : "";
 const key = (s) => canon(s).replace(/[\sঃ.\-–—]/g, "");
 
-/** ইংরেজি নামের তুলনা-কী: ছোট হরফ, শুধু ইংরেজি অক্ষর ও সংখ্যা */
-const ekey = (s) => key(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+/* দিকনির্দেশক ও প্রতিবর্ণীর সমার্থক রূপ — একই উপজেলার নাম দুই উৎসে ভিন্ন
+   বানানে থাকলেও যেন মেলে। উদাহরণ: upazilas.json-এ কুমিল্লা সদর দক্ষিণের
+   ইংরেজি নাম "Comilla Sadar South", অথচ geojson-এ "Comilla Sadar Dakshin";
+   চাঁদপুরের মতলব দক্ষিণ "Matlab Dakkhin" বনাম "Matlab Dakshin"। */
+const EN_FOLD = {
+  south: "dakshin", dakkhin: "dakshin", dakhin: "dakshin",
+  north: "uttar", uttor: "uttar", uttara: "uttar",
+  east: "purba", purbo: "purba",
+  west: "paschim", pashchim: "paschim",
+};
 
-/** ইংরেজি নামের টোকেন সেট — আংশিক মিলের জন্য */
-const etokens = (s) => new Set(String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+/** ইংরেজি নামের টোকেন সেট (সমার্থক শব্দ ভাঁজ করা) */
+const etokens = (s) =>
+  new Set(
+    String(s || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean)
+      .map((t) => EN_FOLD[t] || t),
+  );
+
+/** ইংরেজি নামের তুলনা-স্বাক্ষর: ভাঁজ করা টোকেনগুলো সাজিয়ে যুক্ত করা, ফলে
+    শব্দের ক্রম অপ্রাসঙ্গিক হয়। */
+const ensig = (s) => [...etokens(s)].sort().join("+");
 
 /** SEO-বান্ধব URL অংশ — ইংরেজি নাম থেকে, ছোট হরফে, ড্যাশ যুক্ত */
 function slugify(value, fallback) {
@@ -160,12 +179,12 @@ const upazilaById = new Map(upazilas.map((u) => [String(u.id), u]));
    পলিগনে গন্তব্য বসানোর চেয়ে আসন্ন মান ভালো — ভুল মিল নীরবে ডেটা নষ্ট করে।
    ------------------------------------------------------------------------- */
 const AMBIGUOUS = Symbol("ambiguous-upazila");
-const upazilaFeatureByEn = new Map(); // "districtId|ekey(name)" -> feature | AMBIGUOUS
+const upazilaFeatureByEn = new Map(); // "districtId|ensig(name)" -> feature | AMBIGUOUS
 if (upazilaBounds) {
   for (const f of upazilaBounds.features) {
-    const ek = ekey(f.properties.name || "");
-    if (!ek) continue;
-    const k2 = `${f.properties.district_id}|${ek}`;
+    const sig = ensig(f.properties.name || "");
+    if (!sig) continue;
+    const k2 = `${f.properties.district_id}|${sig}`;
     if (upazilaFeatureByEn.has(k2)) upazilaFeatureByEn.set(k2, AMBIGUOUS);
     else upazilaFeatureByEn.set(k2, f);
   }
@@ -177,6 +196,22 @@ for (const u of upazilas) {
   if (!kb) continue;
   const k2 = `${u.district_id}|${kb}`;
   if (!upazilaByDistBn.has(k2)) upazilaByDistBn.set(k2, u);
+}
+
+/* কোন ইংরেজি স্বাক্ষরের পলিগন কোন উপজেলার "নিজের" (হুবহু মিল) — টোকেন দিয়ে
+   আংশিক মিল খোঁজার সময় এই পলিগনগুলো বাদ দিতে। নাহলে কুমিল্লা সদর
+   ("Comilla Sadar") টোকেন-মিলে একসাথে "Comilla Adarsha Sadar" ও
+   "Comilla Sadar Dakshin" দুটোই পেত, টাই হওয়ায় অস্পষ্ট ধরে বাতিল হতো।
+   এখন "Comilla Sadar Dakshin" কুমিল্লা সদর দক্ষিণের নিজের বলে বাদ পড়ে,
+   ফলে কুমিল্লা সদর একক প্রার্থী হিসেবে সঠিক পলিগনটিই পায়। */
+const featureEnExactOwner = new Map(); // "districtId|ensig(feature.name)" -> উপজেলা রেকর্ড
+for (const u of upazilas) {
+  const sig = ensig(u.name || "");
+  if (!sig) continue;
+  const k2 = `${u.district_id}|${sig}`;
+  const hit = upazilaFeatureByEn.get(k2);
+  if (!hit || hit === AMBIGUOUS) continue;
+  if (!featureEnExactOwner.has(k2)) featureEnExactOwner.set(k2, u);
 }
 /** উপজেলা রেকর্ড খোঁজে — আইডি দিয়ে, নাহলে জেলা+বাংলা নাম দিয়ে */
 function upazilaRecordFor(districtId, upazilaName, upazilaId) {
@@ -308,9 +343,9 @@ function resolveUpazilaFeature(districtId, upazilaName, upazilaId) {
 
   // ২. upazilas.json-এর ইংরেজি নাম দিয়ে — যেসব পলিগনে bn_name খালি
   const rec = upazilaRecordFor(did, upazilaName, upazilaId);
-  const en = rec ? ekey(rec.name || "") : "";
-  if (en) {
-    const hit = upazilaFeatureByEn.get(`${did}|${en}`);
+  const sig = rec ? ensig(rec.name || "") : "";
+  if (sig) {
+    const hit = upazilaFeatureByEn.get(`${did}|${sig}`);
     // AMBIGUOUS হলে ইচ্ছাকৃতভাবে এড়িয়ে যাওয়া হয়: ভুল উপজেলার পলিগনে
     // গন্তব্য বসানোর চেয়ে জেলা-কেন্দ্রের আসন্ন মান ভালো, কারণ ভুল মিল
     // নীরবে ডেটা নষ্ট করে আর ধরাও পড়ে না।
@@ -337,6 +372,10 @@ function resolveUpazilaFeature(districtId, upazilaName, upazilaId) {
       const ft = etokens(f.properties.name || "");
       if (!ft.size) return false;
       for (const t of ut) if (!ft.has(t)) return false;
+      // অন্য কোনো উপজেলার "নিজের" (হুবহু-ইংরেজি) পলিগন হলে বাদ — নাহলে
+      // কুমিল্লা সদর ভুলবশত কুমিল্লা সদর দক্ষিণের পলিগনও দাবি করত।
+      const owner = featureEnExactOwner.get(`${did}|${ensig(f.properties.name || "")}`);
+      if (owner && (!rec || String(owner.id) !== String(rec.id))) return false;
       return true;
     });
     if (cands.length === 1) return { f: cands[0], kind: "en-tokens" };
