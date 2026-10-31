@@ -121,6 +121,7 @@ function districtHq(id) {
 /* উপজেলা পলিগনের কেন্দ্রবিন্দু — জেলা অনুযায়ী সূচি */
 const upazilaCentroid = new Map(); // "districtId|key(name)" -> [lat,lon]
 const upazilaFeaturesByDistrict = new Map(); // districtId -> [feature]
+const upazilaFeatureByName = new Map(); // "districtId|key(name)" -> feature
 if (upazilaBounds) {
   for (const f of upazilaBounds.features) {
     const did = String(f.properties.district_id);
@@ -128,6 +129,9 @@ if (upazilaBounds) {
     const c = centroid(f.geometry);
     if (!nm || !c) continue;
     upazilaCentroid.set(`${did}|${nm}`, c);
+    // একই নামে একাধিক পলিগন থাকলে প্রথমটিই রাখা হয়, যাতে
+    // upazilaCentroid-এর আচরণের সাথে মিল থাকে (দুটো একই ক্রমে লেখে)।
+    if (!upazilaFeatureByName.has(`${did}|${nm}`)) upazilaFeatureByName.set(`${did}|${nm}`, f);
     if (!upazilaFeaturesByDistrict.has(did)) upazilaFeaturesByDistrict.set(did, []);
     upazilaFeaturesByDistrict.get(did).push(f);
   }
@@ -135,6 +139,101 @@ if (upazilaBounds) {
 
 /* আমার উপজেলা তালিকার কেন্দ্রবিন্দু (পলিগনে না মিললে নাম মিলিয়ে) */
 const upazilaById = new Map(upazilas.map((u) => [String(u.id), u]));
+
+/* ---------------------------------------------------------------------------
+   নতুন গন্তব্যের জন্য উপজেলার পলিগনের ভেতরে পৃথক বিন্দু ছড়ানো
+   ---------------------------------------------------------------------------
+   কেন দরকার: নতুন গন্তব্যে lat/lon না দিলে আগে সবগুলো উপজেলার হুবহু একই
+   কেন্দ্রবিন্দু পেত। প্রতি জেলায় ~৩০টি গন্তব্য যোগ করলে সদর উপজেলায় এক
+   ডজনের বেশি গন্তব্য একই বিন্দুতে গাদা হতো — ম্যাপে মার্কার অকেজো, সবার
+   দূরত্ব হুবহু এক, এবং "দুটি ভিন্ন গন্তব্যের স্থানাঙ্ক এক নয়" অভেদটি ভাঙত।
+   এটি সেই একই বাগ-শ্রেণী যা আগে ছেঁড়া দ্বীপ/শাহপরীর দ্বীপ/সাবরাংকে
+   এক বিন্দুতে গুঁজে দিয়েছিল।
+
+   গুরুত্বপূর্ণ: বীজ স্থানটির নিজের নাম থেকে নেওয়া হয়, প্রসেসিং ক্রম থেকে
+   নয় — তাই আউটপুট নির্ণায়ক (deterministic) এবং পাইপলাইনের byte-idempotency
+   অটুট থাকে। নাম বদলালে বিন্দু বদলায়, তাই নামই এখানে স্থিতিশীল চাবি।
+
+   সততার সীমা: এই বিন্দুগুলো আসল অবস্থান নয়, উপজেলা-স্তরের আসন্ন মান
+   মাত্র। তাই coord_source "উপজেলা-কেন্দ্র" এবং coord_verified false-ই থাকে,
+   যাতে সাইটে এটি যাচাই-অপেক্ষমাণ হিসেবে চিহ্নিত থাকে।
+--------------------------------------------------------------------------- */
+
+/** FNV-1a হ্যাশ — স্থিতিশীল বীজ তৈরির জন্য */
+function seedFrom(str) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/** mulberry32 — ছোট, দ্রুত এবং সম্পূর্ণ নির্ণায়ক ছদ্ম-এলোমেলো জেনারেটর */
+function mulberry32(a) {
+  return function () {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * পলিগনের ভেতরে কেন্দ্র থেকে ছড়িয়ে একটি পৃথক বিন্দু খোঁজে।
+ * ক্রমবর্ধমান ব্যাসার্ধের বলয়ে খোঁজে এবং প্রথম বিন্দুটিই নেয় যা
+ * pointInGeometry যাচাইয়ে পাস করে — ফলে বিন্দুটি সবসময় সেই উপজেলার
+ * সীমানার ভেতরেই থাকে, ভুল উপজেলা বা জেলায় পড়ে না।
+ * ভেতরে জায়গা না পেলে কেন্দ্রেই ফিরে আসে (তখন গাদা লাগলেও ভুল অবস্থান নয়)।
+ */
+function scatterInGeometry(geometry, center, seedStr) {
+  if (!center) return null;
+  if (!geometry) return center;
+  const rnd = mulberry32(seedFrom(seedStr));
+  const baseAngle = rnd() * Math.PI * 2;
+  const ring = 0.0022; // প্রতি বলয়ে ~২৪৫ মিটার
+  // দ্রাঘিমাংশকে cos(অক্ষাংশ) দিয়ে ভাগ করলে ছড়ানোটি বাস্তব দূরত্বে
+  // প্রায় বৃত্তাকার হয় — না করলে পূর্ব-পশ্চিমে সংকুচিত দেখাত।
+  const lonStretch = 1 / Math.max(0.35, Math.cos(rad(center[0])));
+  for (let r = 1; r <= 48; r++) {
+    const steps = Math.min(8 + r * 2, 56);
+    for (let s = 0; s < steps; s++) {
+      const angle = baseAngle + (s / steps) * Math.PI * 2;
+      const d = ring * r;
+      const lat = center[0] + d * Math.cos(angle);
+      const lon = center[1] + d * Math.sin(angle) * lonStretch;
+      if (pointInGeometry([lon, lat], geometry)) return [lat, lon];
+    }
+  }
+  return center;
+}
+
+/** upazilaCenter-এর হুবহু একই fallback চেইন অনুসরণ করে উপজেলার পলিগন খোঁজে */
+function upazilaFeatureFor(districtId, upazilaName, upazilaId) {
+  const did = String(districtId);
+  if (upazilaName) {
+    const f = upazilaFeatureByName.get(`${did}|${key(upazilaName)}`);
+    if (f) return f;
+  }
+  if (upazilaId) {
+    const u = upazilaById.get(String(upazilaId));
+    if (u) {
+      const f = upazilaFeatureByName.get(`${did}|${key(u.bn_name)}`);
+      if (f) return f;
+    }
+  }
+  if (upazilaName) {
+    const want = key(upazilaName);
+    const feats = upazilaFeaturesByDistrict.get(did) || [];
+    for (const f of feats) {
+      const nm = key(f.properties.bn_name || f.properties.name);
+      if (!nm) continue;
+      if (nm.includes(want) || want.includes(nm)) return f;
+    }
+  }
+  return null;
+}
 
 /** উপজেলার কেন্দ্রবিন্দু খোঁজে — পলিগন থেকে, না পেলে জেলার কেন্দ্র */
 function upazilaCenter(districtId, upazilaName, upazilaId) {
@@ -318,6 +417,21 @@ function normalizePlace(p, source) {
     if (!c.point) return null;
     lat = c.point[0]; lon = c.point[1];
     coordSource = c.exact ? "উপজেলা-কেন্দ্র" : "জেলা-কেন্দ্র";
+    // একই উপজেলার নতুন গন্তব্যগুলো যেন হুবহু একই বিন্দুতে গাদা না হয়।
+    // শুধু তখনই ছড়ানো হয় যখন উপজেলার নিজস্ব পলিগন পাওয়া গেছে (c.exact) —
+    // জেলা-কেন্দ্র fallback-এ ছড়ালে পুরো জেলা জুড়ে ভুল অবস্থান তৈরি হতো,
+    // তাই তখন কেন্দ্রেই রাখা হয় (গাদা লাগলেও ভুল ঠিকানা নয়)।
+    // বিদ্যমান গন্তব্যে এই শাখা কখনো চলে না, কারণ তাদের lat/lon সংরক্ষিত
+    // আছে; আর enrichPlace স্থানাঙ্ক বদলায় না যতক্ষণ override_coords না থাকে।
+    if (c.exact) {
+      const uf = upazilaFeatureFor(districtId, upazilaName, p.upazila_id);
+      const s = scatterInGeometry(
+        uf && uf.geometry,
+        [lat, lon],
+        `${districtId}|${key(upazilaName || "")}|${key(name)}`,
+      );
+      if (s) { lat = s[0]; lon = s[1]; }
+    }
     inOwnDistrict = true;
   } else if (!inOwnDistrict) {
     // সীমানার বাইরে পড়ছে। উৎসভেদে আচরণ আলাদা:
