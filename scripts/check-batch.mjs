@@ -62,8 +62,11 @@ const REQUIRED = ["name", "district_id", "category", "upazila_bn", "locality", "
 
 let errors = 0;
 let warnings = 0;
+let notes = 0;
 const err = (m) => { console.log("  ✗ " + m); errors++; };
 const warn = (m) => { console.log("  ⚠ " + m); warnings++; };
+/** তথ্যমূলক বার্তা — সমস্যা নয়, কিন্তু জেনে রাখা দরকার */
+const note = (m) => { console.log("  · " + m); notes++; };
 
 const args = process.argv.slice(2);
 let files = args;
@@ -100,6 +103,19 @@ for (const file of files) {
     // ২. নতুন লেখা অবশ্যই যাচাই-বাকি চিহ্নিত থাকবে
     if (p.verified !== false) err(`${label}: verified:false নয় (পেলাম ${JSON.stringify(p.verified)}) — লেখকের নতুন তথ্য যাচাই-বাকি হিসেবে চিহ্নিত হতে হবে`);
 
+    // ২খ. নিশ্চয়তা ঘোষণা — ব্যবহারকারীর সিদ্ধান্ত অনুযায়ী কম-নিশ্চিত গন্তব্যও
+    //      সাইটে থাকবে, কিন্তু data/PLACES_CERTAINTY.md-এ তালিকাভুক্ত হবে
+    //      যাতে প্রশাসন প্যানেল থেকে পরে যাচাই বা মুছে ফেলা যায়।
+    const CERT = ["উচ্চ", "মাঝারি", "নিম্ন"];
+    const cv = canon(p.certainty || "");
+    if (!cv) {
+      warn(`${label}: certainty ঘর নেই — প্রতিবেদনে "ঘোষণা নেই" ধরা হবে (উচ্চ/মাঝারি/নিম্ন)`);
+    } else if (!CERT.includes(cv)) {
+      err(`${label}: অবৈধ certainty "${cv}" (বৈধ: ${CERT.join(", ")})`);
+    } else if (cv !== "উচ্চ" && !canon(p.certainty_note || "")) {
+      err(`${label}: certainty "${cv}" দিলে certainty_note আবশ্যক — কেন অনিশ্চিত তা লিখতে হবে, নইলে পর্যালোচনাকারী জানবেন না কী দেখতে হবে`);
+    }
+
     // ৩. জেলা বৈধ কিনা
     const did = String(p.district_id);
     const d = districtById.get(did);
@@ -129,7 +145,17 @@ for (const file of files) {
     if (seenNames.has(nk)) err(`${label}: নামের সংঘর্ষ — আগে ${seenNames.get(nk)}-তে একই নাম আছে`);
     else seenNames.set(nk, rel);
     const clash = existing.find((x) => String(x.district_id) === did && key(x.name) === key(p.name));
-    if (clash) warn(`${label}: বিদ্যমান গন্তব্যের সাথে নাম মিলছে — এটি সমৃদ্ধকরণ হিসেবে গণ্য হবে, নতুন সারি তৈরি হবে না`);
+    if (clash) {
+      // লেখকের নিজের ব্যাচ আগে বিল্ড হয়ে গেলে নামটি places.json-এ থাকাটাই
+      // স্বাভাবিক — তখন এটি কেবল তথ্য, সমস্যা নয়। কিন্তু মূল ডেটার গন্তব্যের
+      // সাথে মিললে লেখাটি নতুন সারি না হয়ে সমৃদ্ধকরণ হবে, যা লেখক নাও চাইতে
+      // পারেন — তখন সতর্কবার্তা দরকার।
+      if (clash.source === "লেখক") {
+        note(`${label}: নামটি places.json-এ আছে (লেখকের) — ব্যাচটি আগে বিল্ড হয়ে থাকলে স্বাভাবিক`);
+      } else {
+        warn(`${label}: মূল ডেটার গন্তব্যের সাথে নাম মিলছে — নতুন সারি তৈরি না হয়ে সমৃদ্ধকরণ হবে`);
+      }
+    }
 
     // ৮. লিপি ও ভাষা যাচাই
     for (const f of PROSE_FIELDS) {
@@ -165,8 +191,11 @@ for (const file of files) {
 
 console.log("\n" + "=".repeat(52));
 console.log(`মোট ফাইল ${files.length} | গন্তব্য ${totalPlaces}টি | ইতিহাস ${(totalHistory / 1024).toFixed(1)} KB`);
-if (errors === 0 && warnings === 0) console.log("✓ সব যাচাই পাস করেছে।");
-else console.log(`${errors}টি ত্রুটি, ${warnings}টি সতর্কবার্তা।`);
+if (errors === 0 && warnings === 0) {
+  console.log(notes ? `✓ সব যাচাই পাস করেছে (${notes}টি তথ্যবার্তা)।` : "✓ সব যাচাই পাস করেছে।");
+} else {
+  console.log(`${errors}টি ত্রুটি, ${warnings}টি সতর্কবার্তা, ${notes}টি তথ্যবার্তা।`);
+}
 if (errors > 0) {
   console.log("\nত্রুটি থাকলে পাইপলাইন গন্তব্য নীরবে বাদ দিতে পারে — আগে ঠিক করুন।");
 }

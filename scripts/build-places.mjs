@@ -532,15 +532,22 @@ function normalizePlace(p, source) {
 
   let lat = typeof p.lat === "number" ? p.lat : null;
   let lon = typeof p.lon === "number" ? p.lon : null;
-  // "লেখক" মানটি আঠালো (sticky) রাখা হয়। নাহলে স্ক্রিপ্ট দ্বিতীয়বার চললে
-  // গন্তব্যগুলো places.json থেকে "বিদ্যমান" হিসেবে পড়া হতো, source আর
-  // "authored" থাকত না, এবং সংরক্ষিত "লেখক" মানটি চুপচাপ "মূল ডেটা"-তে
-  // বদলে যেত। ফলে তৃতীয় রানে সুরক্ষা চিহ্ন হারিয়ে দ্বীপগুলো আবার
-  // উপজেলা-কেন্দ্রে স্ন্যাপ হতো (১ → ১২ → ৭ এই দোলাচলটাই ঘটছিল)।
-  let coordSource =
-    p.coord_source === "লেখক" ? "লেখক"
-    : p.lat != null ? (source === "authored" ? "লেখক" : "মূল ডেটা")
-    : "উপজেলা-কেন্দ্র";
+  // সংরক্ষিত coord_source আঠালো (sticky) রাখা হয় — যেকোনো মানের জন্য,
+  // কেবল "লেখক"-এর জন্য নয়।
+  //
+  // কেন: স্ক্রিপ্ট নিজের আউটপুটই আবার পড়ে, তাই দ্বিতীয় রানে গন্তব্যগুলো
+  // "বিদ্যমান" হিসেবে আসে এবং source আর "authored" থাকে না। আগে শুধু "লেখক"
+  // মানটি সংরক্ষিত হতো, ফলে পলিগনে ছড়িয়ে-দেওয়া নতুন গন্তব্যগুলো দ্বিতীয়
+  // রানে "উপজেলা-কেন্দ্র" থেকে "মূল ডেটা"-তে বদলে যেত — অর্থাৎ আসন্ন
+  // স্থানাঙ্কের পাশে সাইটে ভুলভাবে "মূল ডেটা" দাবি দেখাত। একই বাগ-শ্রেণী
+  // আগে "লেখক" মানের জন্যও হয়েছিল, যার ফলে দ্বীপগুলো উপজেলা-কেন্দ্রে স্ন্যাপ
+  // হতো (১ → ১২ → ৭ এই দোলাচল)।
+  //
+  // গুরুত্বপূর্ণ: এর পরের দুটি শাখা (স্ন্যাপ ও নতুন স্থানাঙ্ক) coordSource
+  // নিজেই নির্ধারণ করে, তাই সংরক্ষিত মান আঠালো রাখলে সেগুলোর কাজ ব্যাহত হয় না।
+  let coordSource = canon(p.coord_source || "")
+    ? p.coord_source
+    : (p.lat != null ? (source === "authored" ? "লেখক" : "মূল ডেটা") : "উপজেলা-কেন্দ্র");
 
   // উপজেলার নাম শনাক্ত
   let upazilaName = canon(p.upazila_bn || p.upazila || p.thana || "");
@@ -756,6 +763,23 @@ function enrichPlace(target, raw) {
 
 const existingCount = places.length;
 
+/* লেখকের নিজের নিশ্চয়তা-মূল্যায়ন।
+   ব্যবহারকারীর সিদ্ধান্ত অনুযায়ী কম-নিশ্চিত গন্তব্যগুলোও সাইটে যোগ হবে, তবে
+   আলাদা প্রতিবেদনে তালিকাভুক্ত থাকবে — যাতে পরে প্রশাসন প্যানেল থেকে যাচাই
+   করে সংশোধন বা মুছে ফেলা যায়।
+   গুরুত্বপূর্ণ: এই ঘরটি places.json-এ লেখা হয় না। normalizePlace-এর ঘর-তালিকা
+   নির্দিষ্ট, তাই certainty আপনিই ঝরে পড়ে — ডেটাবেস স্কিমা বদলাতে হয় না। */
+const CERTAINTY_LEVELS = ["উচ্চ", "মাঝারি", "নিম্ন"];
+const certaintyLog = [];
+/** ব্যাচের কাঁচা এন্ট্রি থেকে নিশ্চয়তা ও মন্তব্য পড়া */
+function readCertainty(p) {
+  const c = canon(p.certainty || "");
+  return {
+    certainty: CERTAINTY_LEVELS.includes(c) ? c : "",
+    note: canon(p.certainty_note || ""),
+  };
+}
+
 let added = 0;
 for (const p of authored) {
   const districtId = resolveDistrict(p);
@@ -765,17 +789,21 @@ for (const p of authored) {
   }
   const n = normalizePlace({ ...p, district_id: districtId }, "authored");
   if (!n) { flagged.push({ name: canon(p.name), district: districtById.get(districtId)?.bn_name, reason: "নাম/স্থানাঙ্ক নেই" }); continue; }
+  const cert = readCertainty(p);
+  const dName = districtById.get(districtId)?.bn_name || districtId;
   const k = `${n.district_id}|${key(n.name)}`;
   const prev = byKey.get(k);
   if (prev) {
     // একই জেলায় একই নাম → নতুন সারি নয়, বিদ্যমানটিকেই সমৃদ্ধ করা হয়
     if (enrichPlace(prev, p)) enriched.push(prev.name);
     else alreadyApplied.push(n.name); // আগেই প্রয়োগ হয়ে গেছে (পুনরায় চালালে একই ফল)
+    certaintyLog.push({ name: n.name, district: dName, districtId, ...cert });
     continue;
   }
   byKey.set(k, n);
   places.push(n);
   added++;
+  certaintyLog.push({ name: n.name, district: dName, districtId, ...cert });
 }
 
 /* ------------------------------------------------------------------ */
@@ -871,6 +899,94 @@ if (flagged.length) {
 }
 if (alreadyApplied.length) report += `\n## আগেই প্রয়োগ হয়েছে (${alreadyApplied.length})\n\nস্ক্রিপ্টটি পুনরায় চালালে এই গন্তব্যগুলো আবার সমৃদ্ধ হয় না — নতুন তথ্য না পেলে অপরিবর্তিত থাকে।\n\n${alreadyApplied.slice(0, 40).join(", ")}\n`;
 fs.writeFileSync(path.join(root, "data", "PLACES_REPORT.md"), report);
+
+/* ------------------------------------------------------------------ *
+ *  নিশ্চয়তা প্রতিবেদন
+ *
+ *  ব্যবহারকারীর সিদ্ধান্ত: যেসব গন্তব্যের অস্তিত্ব বা বিবরণ নিয়ে লেখক পুরোপুরি
+ *  নিশ্চিত নন, সেগুলোও সাইটে যোগ হবে — কিন্তু এই আলাদা তালিকায় চিহ্নিত
+ *  থাকবে, যাতে পরে প্রশাসন প্যানেল থেকে যাচাই করে সংশোধন বা মুছে ফেলা যায়।
+ *
+ *  কেন আলাদা ফাইল: places.json-এ certainty ঘর যোগ করলে ডেটাবেস স্কিমা,
+ *  Edge Function-এর কলাম-হোয়াইটলিস্ট ও ফ্রন্টএন্ড ম্যাপার — তিন জায়গাতেই
+ *  বদল লাগত। প্রতিবেদনে রাখলে ডেটা-প্রবাহ অপরিবর্তিত থাকে।
+ * ------------------------------------------------------------------ */
+{
+  /* একই গন্তব্য একাধিক ব্যাচে থাকলে কেবল প্রথমটি রাখা হয় */
+  const uniq = new Map();
+  for (const c of certaintyLog) {
+    const k = `${c.district}|${key(c.name)}`;
+    if (!uniq.has(k)) uniq.set(k, c);
+  }
+
+  /* "ধরন" চূড়ান্ত রেকর্ডের source থেকে বের করা হয়, এই রানের প্রক্রিয়াকরণ
+     অবস্থা থেকে নয়। কেন: রান-অবস্থা (নতুন / সমৃদ্ধ / আগেই প্রয়োগ) পাইপলাইন
+     কতবার চলেছে তার ওপর নির্ভর করে — প্রথম রানে "নতুন", পরের রানে "আগেই
+     প্রয়োগ"। ফলে প্রতিবেদনটি রানের ক্রমভিত্তিক অস্থির হয়ে যেত, যা এই স্ক্রিপ্টের
+     idempotency নীতির বিরোধী। source ঘরটি আঠালো, তাই এটি সর্বদা একই ফল দেয়। */
+  const finalByKey = new Map(places.map((pl) => [`${pl.district_id}|${key(pl.name)}`, pl]));
+  const kindOf = (c) => {
+    const pl = finalByKey.get(`${c.districtId}|${key(c.name)}`);
+    if (!pl) return "অনুপস্থিত"; // বিল্ডে বাদ পড়েছে — যাচাইকারী আগেই ধরবে
+    return pl.source === "মূল+লেখক" ? "মূল ডেটা সমৃদ্ধ"
+      : pl.source === "লেখক" ? "লেখকের নতুন"
+      : "মূল ডেটা";
+  };
+
+  const counts = { "উচ্চ": 0, "মাঝারি": 0, "নিম্ন": 0, "": 0 };
+  for (const c of uniq.values()) counts[c.certainty] = (counts[c.certainty] || 0) + 1;
+
+  const lv = (l) => (CERTAINTY_LEVELS.includes(l) ? CERTAINTY_LEVELS.indexOf(l) : 9);
+  const review = [...uniq.values()]
+    .filter((c) => c.certainty === "মাঝারি" || c.certainty === "নিম্ন")
+    .sort(
+      (a, b) =>
+        lv(a.certainty) - lv(b.certainty) ||
+        a.district.localeCompare(b.district, "bn") ||
+        a.name.localeCompare(b.name, "bn"),
+    );
+
+  let out = `# গন্তব্যের নিশ্চয়তা প্রতিবেদন\n\n`;
+  out += `এই ফাইলটি \`scripts/build-places.mjs\` থেকে স্বয়ংক্রিয়ভাবে তৈরি হয় — হাতে সম্পাদনা করবেন না।\n\n`;
+  out += `## প্রেক্ষাপট\n\n`;
+  out += `এই প্রকল্পে কোনো বহিঃস্থ কর্তৃপক্ষীয় উৎস পড়া যায় না, তাই নতুন গন্তব্যের সব তথ্য\n`;
+  out += `লেখকের নিজের জ্ঞান থেকে লেখা এবং প্রতিটি \`verified: false\` হিসেবে চিহ্নিত।\n`;
+  out += `সাথে লেখক নিজের নিশ্চয়তার মাত্রাও ঘোষণা করেন (\`certainty\` ঘর, ব্যাচ ফাইলে)।\n\n`;
+  out += `## সারাংশ\n\n`;
+  out += `| নিশ্চয়তা | গন্তব্য |\n|---|---|\n`;
+  out += `| উচ্চ | ${counts["উচ্চ"]} |\n`;
+  out += `| মাঝারি | ${counts["মাঝারি"]} |\n`;
+  out += `| নিম্ন | ${counts["নিম্ন"]} |\n`;
+  out += `| ঘোষণা নেই (পুরনো ব্যাচ) | ${counts[""]} |\n`;
+  out += `| **মোট লেখকের গন্তব্য** | **${uniq.size}** |\n\n`;
+  out += `**পর্যালোচনা দরকার: ${review.length}টি**\n\n`;
+
+  if (review.length) {
+    out += `## পর্যালোচনার তালিকা\n\n`;
+    out += `নিচের গন্তব্যগুলো সাইটে প্রকাশিত আছে, কিন্তু নাম, অবস্থান বা বর্ণনা নিয়ে লেখকের\n`;
+    out += `নিশ্চয়তা কম। প্রশাসন প্যানেল থেকে এগুলো যাচাই করে সংশোধন বা মুছে ফেলা যাবে।\n`;
+    out += `"নিম্ন" মাত্রাগুলো আগে দেখা উচিত।\n\n`;
+    out += `| নিশ্চয়তা | গন্তব্য | জেলা | ধরন | কেন অনিশ্চিত |\n|---|---|---|---|---|\n`;
+    for (const c of review) {
+      out += `| ${c.certainty} | ${c.name} | ${c.district} | ${kindOf(c)} | ${c.note || "—"} |\n`;
+    }
+    out += `\n`;
+  }
+
+  const unspecified = [...uniq.values()].filter((c) => c.certainty === "");
+  if (unspecified.length) {
+    out += `## নিশ্চয়তা ঘোষণা নেই (${unspecified.length})\n\n`;
+    out += `এগুলো \`certainty\` ঘর চালুর আগের ব্যাচ ফাইল থেকে এসেছে। এগুলোও \`verified: false\`,\n`;
+    out += `তবে লেখক আলাদা করে অনিশ্চয়তা ঘোষণা করেননি। ভবিষ্যতের সব ব্যাচে এই ঘরটি বাধ্যতামূলক\n`;
+    out += `(\`scripts/check-batch.mjs\` যাচাই করে)।\n`;
+  }
+
+  fs.writeFileSync(path.join(root, "data", "PLACES_CERTAINTY.md"), out);
+  console.log(
+    `নিশ্চয়তা    : উচ্চ ${counts["উচ্চ"]} | মাঝারি ${counts["মাঝারি"]} | নিম্ন ${counts["নিম্ন"]} | ` +
+      `ঘোষণা নেই ${counts[""]} | পর্যালোচনা দরকার ${review.length}`,
+  );
+}
 
 console.log("— গন্তব্য তৈরি —");
 console.log("মোট        :", places.length, `(মূল ${existingCount} + নতুন ${added})`);
